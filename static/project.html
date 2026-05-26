@@ -531,6 +531,7 @@ function renderSetRow(img) {
             <div style="display:flex;gap:6px;margin-top:6px">
                 <button class="btn btn-sm btn-outline" onclick="regenOneNarration('${img.id}')">生成口播</button>
                 ${!img.is_custom ? `<button class="btn btn-sm btn-outline" onclick="showRegenModal('${img.id}')">重新生图</button>` : ''}
+                <button class="btn btn-sm btn-outline" style="color:var(--red);border-color:var(--red)" onclick="deleteSetImage('${img.id}','${img.scene}')">删除</button>
             </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;min-width:100px;text-align:center">
@@ -548,6 +549,14 @@ function switchTab(tab) {
     history.replaceState({}, '', url);
     renderStep();
 }
+async function deleteSetImage(setId, scene) {
+    if (!confirm(`确认删除「${scene}」？\n图片将移至discarded目录，音频将被删除。`)) return;
+    await api(`/api/projects/${projName}/set-images/${setId}`, { method: 'DELETE' });
+    await loadProject();
+    renderStep();
+    toast('已删除', 'success');
+}
+
 async function updateSetField(setId, field, value) {
     await api(`/api/projects/${projName}/set-images/${setId}`, {
         method: 'PUT',

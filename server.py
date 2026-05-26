@@ -502,6 +502,33 @@ def api_update_set_image(name: str, set_id: str, body: dict):
     return JSONResponse({"success": True})
 
 
+@app.delete("/api/projects/{name}/set-images/{set_id}")
+def api_delete_set_image(name: str, set_id: str):
+    data = proj.load_project(name)
+    if data is None:
+        raise HTTPException(404, "项目不存在")
+
+    img = next((s for s in data["set_images"] if s["id"] == set_id), None)
+    if img is None:
+        raise HTTPException(404, "套图不存在")
+
+    # 废弃图片
+    for field in ("generated_image", "custom_image"):
+        if img.get(field):
+            proj.move_to_discarded(name, os.path.basename(img[field]))
+
+    # 删除音频
+    if img.get("narration_audio"):
+        audio_path = os.path.join(OUTPUT_DIR, name, img["narration_audio"])
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+
+    data["set_images"] = [s for s in data["set_images"] if s["id"] != set_id]
+    proj.save_project(name, data)
+    log.info(f"删除套图 {set_id}", f"项目: {name}")
+    return JSONResponse({"success": True})
+
+
 # ============================================
 # 新增自定义套图
 # ============================================
