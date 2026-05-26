@@ -321,13 +321,22 @@ def _download_image(url: str, save_path: str):
 def synthesize_tts(text: str, save_path: str) -> bool:
     """调用 TTS 合成语音，保存为 MP3"""
     try:
+        # 网关要求 output_format 为 url 或 hex
         resp = _client.audio.speech.create(
             model=_config["tts_model"],
-            voice="alloy",  # 默认男声
+            voice="alloy",
             input=text,
-            response_format="mp3",
+            response_format="url",
             speed=1.0,
         )
+
+        # response_format="url" 时返回的是文件 URL，需下载
+        url = resp.text if hasattr(resp, 'text') else str(resp)
+        if url and url.startswith("http"):
+            _download_image(url, save_path)  # 复用图片下载逻辑
+            return True
+
+        # 兼容 hex 格式或直接二进制返回
         resp.stream_to_file(save_path)
         return True
     except Exception as e:
