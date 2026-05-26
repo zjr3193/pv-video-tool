@@ -337,13 +337,16 @@ async def api_regenerate_set(name: str, set_id: str, body: dict = None):
 # 步骤 6+7：批量口播生成 + TTS
 # ============================================
 @app.post("/api/projects/{name}/generate-narrations")
-async def api_generate_narrations(name: str):
+async def api_generate_narrations(name: str, body: dict = None):
     data = proj.load_project(name)
     if data is None:
         raise HTTPException(404, "项目不存在")
 
+    aspect = (body or {}).get("aspect_ratio", "")  # 可选按比例筛选
+
     pending = [img for img in data["set_images"]
-               if img["status"] == "done" and not img.get("narration")]
+               if img["status"] == "done" and not img.get("narration")
+               and (not aspect or img["aspect_ratio"] == aspect)]
     if not pending:
         return JSONResponse({"success": True, "message": "没有需要生成口播的套图"})
 
@@ -379,14 +382,17 @@ async def api_generate_narrations(name: str):
 # 步骤 7：TTS 语音合成 (合并所有口播为一条音频)
 # ============================================
 @app.post("/api/projects/{name}/synthesize-tts")
-async def api_synthesize_tts(name: str):
+async def api_synthesize_tts(name: str, body: dict = None):
     data = proj.load_project(name)
     if data is None:
         raise HTTPException(404, "项目不存在")
 
-    # 获取所有有口播的套图，按 order 排序
+    aspect = (body or {}).get("aspect_ratio", "")
+
+    # 按比例筛选，按 order 排序
     items = sorted(
-        [img for img in data["set_images"] if img.get("narration")],
+        [img for img in data["set_images"]
+         if img.get("narration") and (not aspect or img["aspect_ratio"] == aspect)],
         key=lambda x: x["order"]
     )
     if not items:
