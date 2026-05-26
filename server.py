@@ -376,7 +376,7 @@ async def api_generate_narrations(name: str):
 
 
 # ============================================
-# 步骤 7：TTS 语音合成 (非阻塞 + 按序号命名)
+# 步骤 7：TTS 语音合成 (合并所有口播为一条音频)
 # ============================================
 @app.post("/api/projects/{name}/synthesize-tts")
 async def api_synthesize_tts(name: str):
@@ -384,45 +384,47 @@ async def api_synthesize_tts(name: str):
     if data is None:
         raise HTTPException(404, "项目不存在")
 
-    # 筛选有口播但未合成(或无音频文件)的套图
-    pending = []
-    for img in data["set_images"]:
-        if img.get("narration") and not img.get("narration_audio"):
-            pending.append(img)
+    # 获取所有有口播的套图，按 order 排序
+    items = sorted(
+        [img for img in data["set_images"] if img.get("narration")],
+        key=lambda x: x["order"]
+    )
+    if not items:
+        return JSONResponse({"success": True, "message": "没有可合成的口播文案"})
 
-    if not pending:
-        return JSONResponse({"success": True, "message": "没有需要合成的语音"})
+    # 合并为一条文本
+    merged_text = "\n\n".join(img["narration"] for img in items)
 
     # 标记状态
-    for img in pending:
+    for img in items:
         img["tts_status"] = "synthesizing"
+    data["tts_status"] = "synthesizing"
     proj.save_project(name, data)
 
+    save_path = os.path.join(OUTPUT_DIR, name, "audio", "narration.mp3")
+
     # 后台合成
-    def _run_all():
-        for img in pending:
-            order = str(img["order"]).zfill(2)
-            save_path = os.path.join(OUTPUT_DIR, name, "audio", f"{order}.mp3")
+    def _run():
+        success = synthesize_tts(merged_text, save_path)
+        dur = get_audio_duration_ms(save_path) if success else 0
 
-            success = synthesize_tts(img["narration"], save_path)
-            dur = get_audio_duration_ms(save_path) if success else 0
+        cur = proj.load_project(name)
+        if success:
+            cur["narration_audio"] = "audio/narration.mp3"
+            cur["narration_duration"] = dur
+            cur["tts_status"] = "done"
+        else:
+            cur["tts_status"] = "failed"
 
-            cur = proj.load_project(name)
-            for s in cur["set_images"]:
-                if s["id"] == img["id"]:
-                    if success:
-                        s["narration_audio"] = f"audio/{order}.mp3"
-                        s["audio_duration"] = dur
-                        s["tts_status"] = "done"
-                    else:
-                        s["tts_status"] = "failed"
-                    break
-            proj.save_project(name, cur)
+        for s in cur["set_images"]:
+            if s.get("narration"):
+                s["tts_status"] = "done" if success else "failed"
+        proj.save_project(name, cur)
 
     loop = asyncio.get_event_loop()
-    loop.run_in_executor(executor, _run_all)
+    loop.run_in_executor(executor, _run)
 
-    return JSONResponse({"success": True, "message": f"已提交 {len(pending)} 个语音合成任务"})
+    return JSONResponse({"success": True, "message": "已提交语音合成任务"})
 
 
 # ============================================

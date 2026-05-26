@@ -543,40 +543,9 @@ async function doNarrations() {
     await loadProject();
     renderStepsNav();
     renderStep();
-    toast(resp.message || '口播文案已生成', 'success');
-
-    // 自动触发 TTS 合成
-    btn.textContent = '启动TTS合成...';
-    const ttsResp = await api(`/api/projects/${projName}/synthesize-tts`, { method: 'POST' });
-    if (ttsResp.success) {
-        await loadProject();
-        renderStep();
-        btn.textContent = '音频生成中...';
-
-        // 轮询 TTS
-        ttsPollTimer = setInterval(async () => {
-            await loadProject();
-            const items = projectData.set_images.filter(i => i.narration);
-            const pending = items.filter(i => i.tts_status === 'synthesizing');
-            if (pending.length === 0) {
-                clearInterval(ttsPollTimer);
-                ttsPollTimer = null;
-                renderStepsNav();
-                renderStep();
-                btn.disabled = false;
-                btn.textContent = '批量生成口播';
-                const done = items.filter(i => i.tts_status === 'done').length;
-                const fail = items.filter(i => i.tts_status === 'failed').length;
-                toast(`口播+语音完成: ${done} 成功${fail > 0 ? ', ' + fail + ' 失败' : ''}`, fail ? 'error' : 'success');
-            } else {
-                renderStep();
-                btn.textContent = `音频生成中... (${pending.length})`;
-            }
-        }, 2000);
-    } else {
-        btn.disabled = false;
-        btn.textContent = '批量生成口播';
-    }
+    btn.disabled = false;
+    btn.textContent = '批量生成口播';
+    toast('口播文案已生成，请前往步骤7合成语音', 'success');
 }
 async function regenOneNarration(setId) {
     const img = projectData.set_images.find(i => i.id === setId);
@@ -664,27 +633,49 @@ function statusColor(s) {
 function renderStep7(d) {
     const items = d.set_images.filter(i => i.narration);
     const total = items.length;
-    const done = items.filter(i => i.tts_status === 'done').length;
-    const synth = items.filter(i => i.tts_status === 'synthesizing').length;
+    const ttsStatus = d.tts_status || '';
+    const hasAudio = !!d.narration_audio;
+    const isRunning = ttsStatus === 'synthesizing';
 
-    return `<h2>${steps[6].name}</h2><p class="desc">将口播文案合成为语音（MinMax TTS）</p>
-    <p style="font-size:14px;color:var(--text2);margin-bottom:16px">待合成: ${total} 张 | 已合成: ${done}${synth > 0 ? ' | 合成中: ' + synth : ''}</p>
-    <button class="btn btn-primary" id="btnTTS" onclick="doTTS()" ${total===0?'disabled':''}>
-        ${done>0 ? '继续合成' : '一键合成全部语音'}
-    </button>
-    ${done>=total && total>0 ? `<button class="btn btn-primary" style="margin-left:12px" onclick="goToStep(8)">下一步 &#8594;</button>` : ''}
-    <div style="margin-top:20px">
-        ${items.map(img => {
-            const order = String(img.order).padStart(2, '0');
-            const fn = img.narration_audio ? `${order}.mp3` : `${order}.mp3`;
-            return `<div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-                <span style="font-size:13px;min-width:180px">${img.scene}</span>
-                <span style="font-size:12px;color:${statusColor(img.tts_status||'')}">${statusLabel(img.tts_status||'')}</span>
-                ${img.narration_audio ? `<a href="#" style="font-size:13px;color:var(--accent);text-decoration:none;margin:0 12px" onclick="playAudioPopup('${img.id}')">${fn}</a>` : `<span style="font-size:13px;color:var(--text2);margin:0 12px">${fn}</span>`}
-                ${img.narration_audio ? `<button class="btn btn-sm btn-outline" onclick="playAudioPopup('${img.id}')">&#9654; 试听</button>` : ''}
-            </div>`;
-        }).join('')}
+    return `<h2>${steps[6].name}</h2><p class="desc">将步骤6的所有口播合并为一条语音（MinMax TTS）</p>
+    <p style="font-size:14px;color:var(--text2);margin-bottom:16px">共 ${total} 段口播 → 合成一条音频</p>
+
+    ${isRunning ? `<div style="display:flex;align-items:center;gap:12px;padding:16px;background:var(--surface);border-radius:var(--radius);margin-bottom:16px">
+        <span class="spinner"></span><span style="color:var(--accent)">音频生成中...</span>
+    </div>` : ''}
+
+    ${hasAudio ? `<div style="display:flex;align-items:center;gap:12px;padding:16px;background:var(--surface);border-radius:var(--radius);margin-bottom:16px">
+        <span style="color:var(--green);font-size:18px">&#10003;</span>
+        <span style="font-size:15px;font-weight:600">narration.mp3</span>
+        <span style="font-size:12px;color:var(--text2)">${(d.narration_duration||0)/1000000}s</span>
+        <button class="btn btn-sm btn-outline" onclick="playSingleAudio()">&#9654; 试听</button>
+    </div>` : (!isRunning ? `<div style="padding:16px;background:var(--surface);border-radius:var(--radius);margin-bottom:16px;color:var(--text2)">尚未合成</div>` : '')}
+
+    <div style="display:flex;gap:12px">
+        <button class="btn btn-primary" id="btnTTS" onclick="doTTS()" ${total===0?'disabled':''}>
+            ${hasAudio ? '重新合成' : '一键合成语音'}
+        </button>
+        ${hasAudio ? `<button class="btn btn-primary" onclick="goToStep(8)">下一步 &#8594;</button>` : ''}
+    </div>
+
+    <div style="margin-top:20px;font-size:13px;color:var(--text2)">
+        <p>包含以下口播（按顺序）：</p>
+        ${items.map((img, i) => `<div style="padding:4px 0">${i+1}. ${img.scene} — ${(img.narration||'').substring(0,40)}...</div>`).join('')}
     </div>`;
+}
+
+function playSingleAudio() {
+    if (!projectData?.narration_audio) return;
+    const src = `/output/${projName}/${projectData.narration_audio}`;
+    document.getElementById('modalContainer').innerHTML = `
+        <div class="modal-overlay" onclick="this.remove()">
+            <div class="modal-box" onclick="event.stopPropagation()" style="min-width:360px;max-width:500px;text-align:center">
+                <h3 style="margin-bottom:8px">合并口播</h3>
+                <p style="font-size:13px;color:var(--text2);margin-bottom:12px">narration.mp3</p>
+                <audio controls autoplay style="width:100%;margin-bottom:12px" src="${src}"></audio>
+                <button class="btn btn-outline btn-sm" onclick="document.getElementById('modalContainer').innerHTML=''">关闭</button>
+            </div>
+        </div>`;
 }
 
 async function doTTS() {
@@ -697,30 +688,28 @@ async function doTTS() {
         await loadProject();
         renderStep();
 
-        btn.textContent = '合成中...';
         ttsPollTimer = setInterval(async () => {
             await loadProject();
-            const items = projectData.set_images.filter(i => i.narration);
-            const pending = items.filter(i => i.tts_status === 'synthesizing');
-            if (pending.length === 0) {
+            if (projectData.tts_status !== 'synthesizing') {
                 clearInterval(ttsPollTimer);
                 ttsPollTimer = null;
                 renderStepsNav();
                 renderStep();
-                const done = items.filter(i => i.tts_status === 'done').length;
-                const fail = items.filter(i => i.tts_status === 'failed').length;
-                toast(`语音合成完成: ${done} 成功${fail > 0 ? ', ' + fail + ' 失败' : ''}`, fail ? 'error' : 'success');
                 btn.disabled = false;
-                btn.textContent = '继续合成';
+                btn.textContent = '重新合成';
+                if (projectData.tts_status === 'done') {
+                    toast(`语音合成完成 (${(projectData.narration_duration||0)/1000000}s)`, 'success');
+                } else {
+                    toast('语音合成失败', 'error');
+                }
             } else {
                 renderStep();
-                btn.textContent = `合成中... (剩余 ${pending.length})`;
             }
         }, 2000);
     } else {
         toast('提交失败', 'error');
         btn.disabled = false;
-        btn.textContent = '一键合成全部语音';
+        btn.textContent = '一键合成语音';
     }
 }
 
