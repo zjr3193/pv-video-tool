@@ -38,12 +38,21 @@ app.add_middleware(NoCacheMiddleware)
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# 静态文件
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# 静态文件（CSS/JS 走 StaticFiles）
+app.mount("/static", StaticFiles(directory="static", html=False), name="static")
 app.mount("/output", StaticFiles(directory=OUTPUT_DIR), name="output")
 
 # 线程池用于异步任务
 executor = ThreadPoolExecutor(max_workers=4)
+
+
+def html_response(filename: str):
+    """返回 HTML 文件，强制禁用缓存"""
+    return FileResponse(
+        filename,
+        media_type="text/html",
+        headers={"Cache-Control": "no-store, max-age=0"}
+    )
 
 
 # ============================================
@@ -51,7 +60,17 @@ executor = ThreadPoolExecutor(max_workers=4)
 # ============================================
 @app.get("/")
 def serve_index():
-    return FileResponse("static/index.html")
+    return html_response("static/index.html")
+
+
+@app.get("/project")
+def serve_project():
+    return html_response("static/project.html")
+
+
+@app.get("/settings")
+def serve_settings():
+    return html_response("static/settings.html")
 
 
 # ============================================
