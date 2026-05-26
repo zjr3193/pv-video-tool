@@ -139,7 +139,8 @@ function renderStep1(d) {
         ${imgTag || '<p>&#128247; 拖拽或点击上传 (JPG/PNG/WEBP, &le;20MB)</p>'}
         ${d.source_image ? `<p style="font-size:11px;color:var(--text2);margin-top:8px">点击/拖拽可替换图片 (原图移至discarded)</p>` : ''}
     </div>
-    <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" hidden
+    <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp"
+           style="position:absolute;left:-9999px;width:1px;height:1px"
            onchange="handleFileSelect(this)">
     ${d.source_image ? `<div style="margin-top:20px"><button class="btn btn-primary" onclick="goToStep(2)">下一步 &#8594;</button></div>` : ''}`;
 }
@@ -481,7 +482,7 @@ function renderStep6(d) {
         <button class="btn btn-primary btn-sm" id="btnNarrations" onclick="doNarrations()">批量生成口播+合成</button>
         <button class="btn btn-outline btn-sm" onclick="showCustomModal()">+ 新增套图</button>
         <button class="btn btn-outline btn-sm" onclick="document.getElementById('bgmInput').click()">&#9835; 上传背景音乐</button>
-        <input type="file" id="bgmInput" accept="audio/*" style="display:none" onchange="uploadBGM(this)">
+        <input type="file" id="bgmInput" accept="audio/*" style="position:absolute;left:-9999px;width:1px;height:1px" onchange="uploadBGM(this)">
     </div>
 
     ${isRunning ? `<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--surface);border-radius:var(--radius);margin-bottom:12px">
@@ -634,7 +635,7 @@ function showCustomModal() {
                     <div style="display:flex;gap:8px;align-items:center">
                         <button class="btn btn-outline btn-sm" onclick="document.getElementById('customFile').click()">选择文件</button>
                         <span id="customFileName" style="font-size:12px;color:var(--text2)">未选择</span>
-                        <input type="file" id="customFile" accept="image/*" style="display:none" onchange="document.getElementById('customFileName').textContent=this.files[0]?.name||'未选择';const r=new FileReader();r.onload=function(){document.getElementById('customPreview').src=this.result;document.getElementById('customPreview').style.display='block'};r.readAsDataURL(this.files[0])">
+                        <input type="file" id="customFile" accept="image/*" style="position:absolute;left:-9999px;width:1px;height:1px" onchange="document.getElementById('customFileName').textContent=this.files[0]?.name||'未选择';const r=new FileReader();r.onload=function(){document.getElementById('customPreview').src=this.result;document.getElementById('customPreview').style.display='block'};r.readAsDataURL(this.files[0])">
                     </div>
                 </div>
                 <div style="margin-bottom:12px"><img id="customPreview" style="max-width:200px;max-height:150px;display:none;border-radius:var(--radius)"></div>
