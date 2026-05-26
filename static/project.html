@@ -311,7 +311,7 @@ function renderSetCard(img) {
     const statusColors = { pending: 'var(--text2)', generating: 'var(--accent)', done: 'var(--green)', failed: 'var(--red)' };
     let thumb = '';
     if (img.generated_image && img.status === 'done') {
-        thumb = `<img src="/output/${projName}/${img.generated_image}" style="width:100%;height:120px;object-fit:cover;border-radius:4px;margin-bottom:8px">`;
+        thumb = `<img src="/output/${projName}/${img.generated_image}" style="width:100%;height:120px;object-fit:cover;border-radius:4px;margin-bottom:8px;cursor:pointer" onclick="viewLarge(this.src)">`;
     } else {
         thumb = `<div style="width:100%;height:120px;background:var(--surface2);border-radius:4px;margin-bottom:8px;display:flex;align-items:center;justify-content:center;font-size:32px;color:var(--text2)">${statusIcons[img.status]}</div>`;
     }
@@ -369,7 +369,7 @@ function renderSetRow(img) {
     const thumbStyle = img.aspect_ratio === '9:16' ? 'width:90px;height:160px;' : 'width:160px;height:90px;';
     const imgPath = img.generated_image || img.custom_image;
     return `<div class="set-image-row">
-        ${imgPath ? `<img src="/output/${projName}/${imgPath}" style="${thumbStyle}object-fit:cover;border-radius:4px">` : '<div style="background:var(--surface2);border-radius:4px;' + thumbStyle + '"></div>'}
+        ${imgPath ? `<img src="/output/${projName}/${imgPath}" style="${thumbStyle}object-fit:cover;border-radius:4px;cursor:pointer" onclick="viewLarge(this.src)">` : '<div style="background:var(--surface2);border-radius:4px;' + thumbStyle + '"></div>'}
         <div>
             <div style="font-size:13px;font-weight:600;margin-bottom:6px">${img.scene} <span style="color:var(--text2);font-weight:400">(${img.aspect_ratio})</span></div>
             <div style="font-size:11px;color:var(--text2);max-height:60px;overflow:hidden;margin-bottom:8px" title="${img.prompt_diff}">提示词: ${img.prompt_diff?.substring(0,80)}...</div>
@@ -425,6 +425,13 @@ async function regenOneNarration(setId) {
     renderStep();
     toast('口播已生成', 'success');
 }
+function viewLarge(src) {
+    document.getElementById('modalContainer').innerHTML = `
+        <div class="modal-overlay" onclick="this.remove()" style="background:rgba(0,0,0,.85);z-index:1001">
+            <img src="${src}" style="max-width:90vw;max-height:90vh;border-radius:8px;cursor:default" onclick="event.stopPropagation()">
+        </div>`;
+}
+
 function showCustomModal() {
     document.getElementById('modalContainer').innerHTML = `
         <div class="modal-overlay" onclick="this.remove()">
@@ -433,13 +440,21 @@ function showCustomModal() {
                 <div style="margin-bottom:12px"><label style="font-size:14px;color:var(--text2)">场景说明</label><input class="input-field" id="customScene" placeholder="如：合同签订现场"></div>
                 <div style="margin-bottom:12px"><label style="font-size:14px;color:var(--text2)">比例</label>
                     <select class="input-field" id="customRatio"><option value="16:9">16:9 横屏</option><option value="9:16">9:16 竖屏</option></select></div>
-                <div style="margin-bottom:12px"><label style="font-size:14px;color:var(--text2)">图片</label><input type="file" id="customFile" accept="image/*"></div>
+                <div style="margin-bottom:12px"><label style="font-size:14px;color:var(--text2)">图片</label>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <button class="btn btn-outline btn-sm" onclick="document.getElementById('customFile').click()">选择文件</button>
+                        <span id="customFileName" style="font-size:12px;color:var(--text2)">未选择</span>
+                        <input type="file" id="customFile" accept="image/*" hidden onchange="document.getElementById('customFileName').textContent=this.files[0]?.name||'未选择'">
+                    </div>
+                </div>
+                <div style="margin-bottom:12px"><img id="customPreview" style="max-width:200px;max-height:150px;display:none;border-radius:var(--radius)"></div>
                 <div class="modal-actions">
                     <button class="btn btn-outline" onclick="document.getElementById('modalContainer').innerHTML=''">取消</button>
                     <button class="btn btn-primary" onclick="addCustomImage()">添加</button>
                 </div>
             </div>
         </div>`;
+}
 }
 async function addCustomImage() {
     const scene = document.getElementById('customScene').value.trim();
