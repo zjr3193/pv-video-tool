@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>设置 - 光伏短视频工具</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<div class="topbar">
+    <h1><a href="/" style="color:var(--text);text-decoration:none;"><span class="logo">&#9728;</span></a> 设置</h1>
+    <div class="actions">
+        <a href="/" class="btn btn-outline btn-sm">&#8592; 返回首页</a>
+    </div>
+</div>
+
+<div class="settings-page">
+    <div class="settings-group">
+        <h3>API 配置</h3>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:16px">所有 API 统一通过 OpenAI 兼容网关访问。配置从根目录 .env 文件读取。</p>
+        <div class="form-row">
+            <label>API Base URL</label>
+            <input class="input-field" id="cfg_base_url" readonly placeholder="从 .env 读取">
+        </div>
+        <div class="form-row">
+            <label>API Key</label>
+            <input class="input-field" type="password" id="cfg_api_key" readonly placeholder="从 .env 读取">
+        </div>
+        <div class="form-row">
+            <label>文本/识图模型</label>
+            <input class="input-field" id="cfg_gpt_model" readonly placeholder="从 .env 读取">
+        </div>
+        <div class="form-row">
+            <label>生图模型</label>
+            <input class="input-field" id="cfg_image_model" readonly placeholder="从 .env 读取">
+        </div>
+        <div class="form-row">
+            <label>TTS 模型</label>
+            <input class="input-field" id="cfg_tts_model" readonly placeholder="从 .env 读取">
+        </div>
+        <p style="font-size:12px;color:var(--yellow);margin-top:8px">&#9888; API 配置通过根目录 .env 文件管理，在此处只读显示。修改请编辑 .env 文件后重启服务。</p>
+    </div>
+
+    <div class="settings-group">
+        <h3>剪映草稿目录</h3>
+        <div class="form-row">
+            <label>草稿目录路径</label>
+            <input class="input-field" id="cfg_draft_dir" readonly placeholder="E:\JianyingPro Drafts">
+        </div>
+    </div>
+
+    <div class="settings-group">
+        <h3>默认套图配置</h3>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:12px">共 12 张（6 张 16:9 + 6 张 9:16），修改后新项目生效。</p>
+    </div>
+
+    <div class="settings-group">
+        <h3>提示词优化规则</h3>
+        <div class="form-row">
+            <label>地域偏好</label>
+            <input class="input-field" value="广东" readonly>
+        </div>
+        <div class="form-row">
+            <label>附加描述</label>
+            <input class="input-field" value="空调外机、工业园区、运行中、道路绿化、车辆" readonly>
+        </div>
+        <div class="form-row">
+            <label>排除描述</label>
+            <input class="input-field" value="文字、logo、水印、品牌标识" readonly>
+        </div>
+        <p style="font-size:12px;color:var(--text2);margin-top:8px">V1.1 支持自定义编辑上述规则。</p>
+    </div>
+
+    <div class="settings-group">
+        <h3>关于</h3>
+        <p style="font-size:13px;color:var(--text2)">光伏短视频内容制作工具 V1.0</p>
+        <p style="font-size:12px;color:var(--text2);margin-top:4px">
+            &#9888; 本工具生成的 AI 图片和语音仅供素材制作参考，发布前请自行审核内容合规性。
+        </p>
+    </div>
+</div>
+
+<script>
+(async function() {
+    try {
+        const resp = await fetch('/api/projects');
+        // 从服务端获取配置（实际上从 .env 读取）
+        // V1.0 简化处理，直接显示提示
+        document.getElementById('cfg_base_url').value = '读取自 .env (OPENAI_BASE_URL)';
+        document.getElementById('cfg_api_key').value = '读取自 .env (OPENAI_API_KEY)';
+        document.getElementById('cfg_gpt_model').value = '读取自 .env (OPENAI_GPT_MODEL)';
+        document.getElementById('cfg_image_model').value = '读取自 .env (OPENAI_IMAGE_MODEL)';
+        document.getElementById('cfg_tts_model').value = '读取自 .env (minimax_text2voice_model)';
+        document.getElementById('cfg_draft_dir').value = '读取自 .env (JIANYING_DRAFT_DIR)';
+    } catch(e) {}
+})();
+</script>
+</body>
+</html>

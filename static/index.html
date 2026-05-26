@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>光伏短视频工具</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<div class="topbar">
+    <h1><span class="logo">&#9728;</span>光伏短视频工具</h1>
+    <div class="actions">
+        <a href="/static/settings.html" class="btn btn-outline btn-sm">&#9881; 设置</a>
+    </div>
+</div>
+
+<div class="project-grid" id="projectGrid">
+    <div class="empty-state" style="grid-column: 1/-1; padding: 120px 20px;">
+        <div class="icon">&#9728;</div>
+        <p>暂无项目，点击右下角按钮创建</p>
+    </div>
+</div>
+
+<button class="fab" onclick="createProject()" title="新建项目">+</button>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+const API = '';
+const statusLabels = {
+    new: '新建', source_uploaded: '源图已上传', vision_done: '识图完成',
+    prompt_done: '提示词已生成', anchor_done: '锚图已生成',
+    set_done: '套图已生成', narration_done: '口播已生成', draft_done: '草稿已生成'
+};
+const statusClass = {
+    new: 'status-new', source_uploaded: 'status-progress', vision_done: 'status-progress',
+    prompt_done: 'status-progress', anchor_done: 'status-progress',
+    set_done: 'status-progress', narration_done: 'status-progress', draft_done: 'status-done'
+};
+
+function toast(msg, type='info') {
+    const c = document.getElementById('toastContainer');
+    const t = document.createElement('div');
+    t.className = `toast ${type}`; t.textContent = msg;
+    c.appendChild(t);
+    setTimeout(() => t.remove(), 3000);
+}
+
+async function loadProjects() {
+    try {
+        const resp = await fetch(`${API}/api/projects`);
+        const projects = await resp.json();
+        const grid = document.getElementById('projectGrid');
+        if (!projects.length) {
+            grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;padding:120px 20px"><div class="icon">&#9728;</div><p>暂无项目，点击右下角按钮创建</p></div>`;
+            return;
+        }
+        grid.innerHTML = projects.map(p => `
+            <div class="project-card" onclick="openProject('${p.name}')">
+                <div class="thumb">
+                    ${p.source_thumbnail
+                        ? `<img src="${p.source_thumbnail}" alt="${p.name}">`
+                        : '&#9728;'}
+                </div>
+                <div class="info">
+                    <div class="name">${p.name}</div>
+                    <div class="meta">${p.created_at || ''}</div>
+                    <span class="status-tag ${statusClass[p.status] || 'status-new'}">${statusLabels[p.status] || p.status}</span>
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        toast('加载项目列表失败: ' + e.message, 'error');
+    }
+}
+
+function openProject(name) {
+    window.location.href = `/static/project.html?name=${encodeURIComponent(name)}`;
+}
+
+async function createProject() {
+    try {
+        const resp = await fetch(`${API}/api/projects`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            toast(`项目 "${data.name}" 已创建`);
+            openProject(data.name);
+        }
+    } catch (e) {
+        toast('创建失败: ' + e.message, 'error');
+    }
+}
+
+loadProjects();
+</script>
+</body>
+</html>
