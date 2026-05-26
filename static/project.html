@@ -54,7 +54,10 @@ function toast(msg, type='info') {
     c.appendChild(t); setTimeout(() => t.remove(), 3000);
 }
 function api(endpoint, opts={}) {
-    return fetch(`${API}${endpoint}`, opts).then(r => r.json());
+    return fetch(`${API}${endpoint}`, opts).then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+    });
 }
 
 // ========== 步骤导航 ==========
@@ -561,10 +564,18 @@ async function buildDraft(aspect) {
 // ========== 初始化 ==========
 (async function init() {
     if (!projName) { location.href = '/'; return; }
-    await loadProject();
-    currentStep = findMaxDoneStep() || 1;
-    renderStepsNav();
-    renderStep();
+    try {
+        await loadProject();
+        currentStep = findMaxDoneStep() || 1;
+        renderStepsNav();
+        renderStep();
+    } catch (e) {
+        document.getElementById('mainArea').innerHTML = `
+            <h2>加载失败</h2>
+            <p style="color:var(--red);margin:16px 0">${e.message}</p>
+            <button class="btn btn-outline" onclick="location.reload()">重试</button>
+            <button class="btn btn-outline" style="margin-left:8px" onclick="location.href='/'">返回首页</button>`;
+    }
 })();
 </script>
 </body>
