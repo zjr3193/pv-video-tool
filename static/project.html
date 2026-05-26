@@ -313,7 +313,9 @@ function renderSetCard(img) {
     const statusIcons = { pending: '&#9679;', generating: '<span class="spinner"></span>', done: '&#10003;', failed: '&#10007;' };
     const statusColors = { pending: 'var(--text2)', generating: 'var(--accent)', done: 'var(--green)', failed: 'var(--red)' };
     let thumb = '';
-    if (img.generated_image && img.status === 'done') {
+    if (img.status === 'generating') {
+        thumb = `<div style="width:100%;height:120px;background:var(--surface2);border-radius:4px;margin-bottom:8px;display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--accent)"><span class="spinner"></span></div>`;
+    } else if (img.generated_image && img.status === 'done') {
         thumb = `<img src="/output/${projName}/${img.generated_image}" style="width:100%;height:120px;object-fit:cover;border-radius:4px;margin-bottom:8px;cursor:pointer" onclick="viewLarge(this.src)">`;
     } else {
         thumb = `<div style="width:100%;height:120px;background:var(--surface2);border-radius:4px;margin-bottom:8px;display:flex;align-items:center;justify-content:center;font-size:32px;color:var(--text2)">${statusIcons[img.status]}</div>`;
@@ -328,23 +330,138 @@ function renderSetCard(img) {
     </div>`;
 }
 
+let setPollTimer = null;
+
 async function doSet() {
     const btn = document.getElementById('btnSet');
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 生成中...';
+    btn.disabled = true;
+    btn.textContent = '正在提交...';
+
     const resp = await api(`/api/projects/${projName}/generate-set`, { method: 'POST' });
-    await loadProject();
-    renderStepsNav();
-    renderStep();
-    const fail = resp.results ? resp.results.filter(r => !r.success).length : 0;
-    toast(`套图生成完成${fail > 0 ? '，' + fail + ' 张失败' : ''}`, fail ? 'error' : 'success');
-    btn.disabled = false; btn.textContent = '继续生成';
+    if (resp.success) {
+        toast(resp.message || '任务已提交', 'success');
+        await loadProject();
+        renderStep();
+
+        // 开始轮询
+        btn.textContent = '生成中...';
+        setPollTimer = setInterval(async () => {
+            await loadProject();
+            const pending = projectData.set_images.filter(i => !i.is_custom && i.status === 'generating');
+            if (pending.length === 0) {
+                clearInterval(setPollTimer);
+                setPollTimer = null;
+                renderStepsNav();
+                renderStep();
+                const fail = projectData.set_images.filter(i => !i.is_custom && i.status === 'failed').length;
+                const done = projectData.set_images.filter(i => !i.is_custom && i.status === 'done').length;
+                toast(`套图生成完成: ${done} 成功${fail > 0 ? ', ' + fail + ' 失败' : ''}`, fail ? 'error' : 'success');
+                btn.disabled = false;
+                btn.textContent = '继续生成';
+            } else {
+                renderStep();
+                btn.textContent = `生成中... (剩余 ${pending.length})`;
+            }
+        }, 3000);
+    } else {
+        toast('提交失败', 'error');
+        btn.disabled = false;
+        btn.textContent = '生成套图';
+    }
 }
-async function regenerateSet(setId) {
-    toast('正在重新生成...', 'info');
-    await api(`/api/projects/${projName}/regenerate-set/${setId}`, { method: 'POST' });
-    await loadProject();
+function showRegenModal(setId) {
+    const img = projectData.set_images.find(i => i.id === setId);
+    if (!img) return;
+
+    // 收集可选参考图: 锚图 + 所有已生成的套图
+    let refOptions = [];
+    if (projectData.anchor_image) {
+        refOptions.push({label: '锚图', path: projectData.anchor_image});
+    }
+    for (const s of projectData.set_images) {
+        if (s.generated_image && s.status === 'done') {
+            refOptions.push({label: s.scene + ' (' + s.aspect_ratio + ')', path: s.generated_image});
+        }
+    }
+    // 去重
+    const seen = new Set();
+    refOptions = refOptions.filter(r => { const k = r.path; if (seen.has(k)) return false; seen.add(k); return true; });
+
+    const opts = refOptions.map((r, i) =>
+        `<label style="display:flex;align-items:center;gap:8px;padding:6px;margin:4px 0;cursor:pointer;border-radius:4px;border:1px solid var(--border)">
+            <input type="radio" name="refImage" value="${r.path}" ${i===0?'checked':''}>
+            <img src="/output/${projName}/${r.path}" style="width:80px;height:45px;object-fit:cover;border-radius:3px">
+            <span style="font-size:13px">${r.label}</span>
+        </label>`
+    ).join('');
+
+    document.getElementById('modalContainer').innerHTML = `
+        <div class="modal-overlay" onclick="this.remove()">
+            <div class="modal-box" onclick="event.stopPropagation()" style="max-width:700px">
+                <h3>重新生图 - ${img.scene}</h3>
+                <div style="margin-bottom:12px">
+                    <label style="font-size:14px;color:var(--text2);display:block;margin-bottom:8px">选择参考图:</label>
+                    <div style="max-height:200px;overflow-y:auto">${opts}</div>
+                </div>
+                <div style="margin-bottom:12px">
+                    <label style="font-size:14px;color:var(--text2);display:block;margin-bottom:4px">提示词 (可编辑):</label>
+                    <textarea class="text-area" id="regenPrompt" style="min-height:80px">${img.prompt_diff || ''}</textarea>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-outline" onclick="document.getElementById('modalContainer').innerHTML=''">取消</button>
+                    <button class="btn btn-primary" id="btnRegenSubmit" onclick="submitRegen('${setId}')">生图</button>
+                </div>
+            </div>
+        </div>`;
+}
+
+async function submitRegen(setId) {
+    const refImage = document.querySelector('input[name="refImage"]:checked')?.value;
+    const prompt = document.getElementById('regenPrompt').value.trim();
+    if (!refImage) { toast('请选择参考图', 'error'); return; }
+
+    const btn = document.getElementById('btnRegenSubmit');
+    btn.disabled = true; btn.textContent = '提交中...';
+
+    try {
+        await api(`/api/projects/${projName}/regenerate-set/${setId}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ref_image: refImage, prompt: prompt})
+        });
+        document.getElementById('modalContainer').innerHTML = '';
+        toast('任务已提交', 'success');
+
+        // 标记本地状态为 generating (缩略图显示加载中)
+        const img = projectData.set_images.find(i => i.id === setId);
+        if (img) { img.status = 'generating'; img.generated_image = null; }
+        renderStep();
+
+        // 开始轮询
+        pollSetStatus(setId);
+    } catch (e) {
+        toast('提交失败: ' + e.message, 'error');
+        btn.disabled = false; btn.textContent = '生图';
+    }
+}
+
+async function pollSetStatus(setId) {
+    const maxAttempts = 60;  // 最多轮询 3 分钟
+    let attempts = 0;
+    while (attempts < maxAttempts) {
+        await new Promise(r => setTimeout(r, 3000));
+        await loadProject();
+        const img = projectData.set_images.find(i => i.id === setId);
+        if (!img || img.status === 'done' || img.status === 'failed') {
+            renderStep();
+            if (img?.status === 'done') toast('生图完成', 'success');
+            else if (img?.status === 'failed') toast('生图失败: ' + (img.error_msg || ''), 'error');
+            return;
+        }
+        attempts++;
+    }
     renderStep();
-    toast('重生成完成', 'success');
+    toast('轮询超时，请刷新页面查看', 'info');
 }
 
 // ===== 步骤 6：内容编辑 =====
@@ -371,8 +488,16 @@ function renderStep6(d) {
 function renderSetRow(img) {
     const thumbStyle = img.aspect_ratio === '9:16' ? 'width:90px;height:160px;' : 'width:160px;height:90px;';
     const imgPath = img.generated_image || img.custom_image;
+    let thumbHtml = '';
+    if (img.status === 'generating') {
+        thumbHtml = `<div style="background:var(--surface2);border-radius:4px;${thumbStyle}display:flex;align-items:center;justify-content:center"><span class="spinner"></span></div>`;
+    } else if (imgPath) {
+        thumbHtml = `<img src="/output/${projName}/${imgPath}" style="${thumbStyle}object-fit:cover;border-radius:4px;cursor:pointer" onclick="viewLarge(this.src)">`;
+    } else {
+        thumbHtml = '<div style="background:var(--surface2);border-radius:4px;' + thumbStyle + '"></div>';
+    }
     return `<div class="set-image-row">
-        ${imgPath ? `<img src="/output/${projName}/${imgPath}" style="${thumbStyle}object-fit:cover;border-radius:4px;cursor:pointer" onclick="viewLarge(this.src)">` : '<div style="background:var(--surface2);border-radius:4px;' + thumbStyle + '"></div>'}
+        ${thumbHtml}
         <div>
             <div style="font-size:13px;font-weight:600;margin-bottom:6px">${img.scene} <span style="color:var(--text2);font-weight:400">(${img.aspect_ratio})</span></div>
             <div style="font-size:11px;color:var(--text2);max-height:60px;overflow:hidden;margin-bottom:8px" title="${img.prompt_diff}">提示词: ${img.prompt_diff?.substring(0,80)}...</div>
@@ -384,7 +509,7 @@ function renderSetRow(img) {
                       onchange="updateSetField('${img.id}','narration',this.value)">${img.narration||''}</textarea>
             <div style="display:flex;gap:6px;margin-top:6px">
                 <button class="btn btn-sm btn-outline" onclick="regenOneNarration('${img.id}')">生成口播</button>
-                ${!img.is_custom ? `<button class="btn btn-sm btn-outline" onclick="regenerateSet('${img.id}')">重新生图</button>` : ''}
+                ${!img.is_custom ? `<button class="btn btn-sm btn-outline" onclick="showRegenModal('${img.id}')">重新生图</button>` : ''}
             </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px">

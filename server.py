@@ -227,104 +227,110 @@ async def api_generate_set(name: str):
     if not pending:
         return JSONResponse({"success": True, "message": "没有待生成的套图"})
 
-    # 更新状态
+    # 更新状态为 generating
     for img in pending:
         img["status"] = "generating"
+        img["error_msg"] = ""
     proj.save_project(name, data)
 
-    # 并行生成（最多 4 路并发）
+    # 后台执行（4路并发，每个完成后写 project.json）
     sem = asyncio.Semaphore(4)
 
-    async def gen_one(img):
-        async with sem:
-            sid = img["id"]
-            ratio = img["aspect_ratio"]
-            save_name = f"{sid}_{ratio.replace(':', 'x')}.png"
-            save_path = os.path.join(OUTPUT_DIR, name, "images", save_name)
+    def _run_one(img):
+        sid = img["id"]
+        ratio = img["aspect_ratio"]
+        save_name = f"{sid}_{ratio.replace(':', 'x')}.png"
+        save_path = os.path.join(OUTPUT_DIR, name, "images", save_name)
 
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                executor,
-                generate_image_from_ref,
-                anchor_path, img["prompt_diff"], save_path, ratio
-            )
+        result = generate_image_from_ref(anchor_path, img["prompt_diff"], save_path, ratio)
+        cur = proj.load_project(name)
+        for s in cur["set_images"]:
+            if s["id"] == sid:
+                if result.get("success"):
+                    if s.get("generated_image"):
+                        proj.move_to_discarded(name, os.path.basename(s["generated_image"]))
+                    s["status"] = "done"
+                    s["generated_image"] = f"images/{save_name}"
+                else:
+                    s["status"] = "failed"
+                    s["error_msg"] = result.get("error", "未知错误")
+                break
+        proj.save_project(name, cur)
 
-            # 重新加载数据
-            cur = proj.load_project(name)
-            success_flag = result.get("success")
-            for s in cur["set_images"]:
-                if s["id"] == sid:
-                    if success_flag:
-                        if s.get("generated_image"):
-                            proj.move_to_discarded(name, os.path.basename(s["generated_image"]))
-                        s["status"] = "done"
-                        s["generated_image"] = f"images/{save_name}"
-                    else:
-                        s["status"] = "failed"
-                        s["error_msg"] = result.get("error", "未知错误")
-                    break
-            proj.save_project(name, cur)
-            return {"id": sid, "success": success_flag, "error": result.get("error")}
+    def _run_all():
+        from concurrent.futures import as_completed
+        from threading import Semaphore as TSem, Thread
+        tsem = TSem(4)
+        threads = []
+        def _wrap(i):
+            with tsem:
+                _run_one(i)
+        for img in pending:
+            t = Thread(target=_wrap, args=(img,))
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join()
 
-    results = await asyncio.gather(*[gen_one(img) for img in pending])
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(executor, _run_all)
 
-    # 更新项目状态
-    data = proj.load_project(name)
-    if all(img["status"] == "done" for img in data["set_images"] if not img.get("is_custom")):
-        data["status"] = "set_done"
-    proj.save_project(name, data)
-
-    return JSONResponse({"success": True, "results": results})
+    return JSONResponse({"success": True, "message": f"已提交 {len(pending)} 个生图任务"})
 
 
 # ============================================
-# 单张套图重新生成
+# 单张套图重新生成 (非阻塞提交 + 后台轮询)
 # ============================================
 @app.post("/api/projects/{name}/regenerate-set/{set_id}")
-async def api_regenerate_set(name: str, set_id: str):
+async def api_regenerate_set(name: str, set_id: str, body: dict = None):
     data = proj.load_project(name)
     if data is None:
         raise HTTPException(404, "项目不存在")
-    if not data.get("anchor_image"):
-        raise HTTPException(400, "请先生成锚图")
 
     img = next((s for s in data["set_images"] if s["id"] == set_id), None)
     if img is None:
         raise HTTPException(404, "套图不存在")
 
-    anchor_path = os.path.join(OUTPUT_DIR, name, data["anchor_image"])
+    # 参考图路径: 优先用指定的ref_image, 否则用锚图
+    ref_rel = (body or {}).get("ref_image", data.get("anchor_image", ""))
+    ref_path = os.path.join(OUTPUT_DIR, name, ref_rel)
+    if not os.path.exists(ref_path):
+        raise HTTPException(400, f"参考图不存在: {ref_rel}")
+
+    # 提示词: 优先用传入的prompt, 否则用原套图的prompt_diff
+    prompt = (body or {}).get("prompt", img.get("prompt_diff", ""))
 
     # 废弃旧图
     if img.get("generated_image"):
         proj.move_to_discarded(name, os.path.basename(img["generated_image"]))
 
-    img["status"] = "generating"
-    proj.save_project(name, data)
-
     ratio = img["aspect_ratio"]
     save_name = f"{set_id}_{ratio.replace(':', 'x')}.png"
     save_path = os.path.join(OUTPUT_DIR, name, "images", save_name)
 
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(
-        executor,
-        generate_image_from_ref,
-        anchor_path, img["prompt_diff"], save_path, ratio
-    )
-
-    data = proj.load_project(name)
-    for s in data["set_images"]:
-        if s["id"] == set_id:
-            s["status"] = "done" if result.get("success") else "failed"
-            if result.get("success"):
-                s["generated_image"] = f"images/{save_name}"
-                s["error_msg"] = ""
-            else:
-                s["error_msg"] = result.get("error", "未知错误")
-            break
+    img["status"] = "generating"
+    img["error_msg"] = ""
     proj.save_project(name, data)
 
-    return JSONResponse({"success": success})
+    # 后台执行生图
+    def _run_and_save():
+        result = generate_image_from_ref(ref_path, prompt, save_path, ratio)
+        cur = proj.load_project(name)
+        for s in cur["set_images"]:
+            if s["id"] == set_id:
+                s["status"] = "done" if result.get("success") else "failed"
+                if result.get("success"):
+                    s["generated_image"] = f"images/{save_name}"
+                    s["error_msg"] = ""
+                else:
+                    s["error_msg"] = result.get("error", "未知错误")
+                break
+        proj.save_project(name, cur)
+
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(executor, _run_and_save)
+
+    return JSONResponse({"success": True, "message": "任务已提交"})
 
 
 # ============================================

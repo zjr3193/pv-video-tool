@@ -16,3 +16,4 @@ __pycache__/
 
 # 系统
 Thumbs.db
+static/js/_temp.js
