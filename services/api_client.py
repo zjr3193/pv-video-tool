@@ -321,25 +321,47 @@ def _download_image(url: str, save_path: str):
 # ============================================
 def synthesize_tts(text: str, save_path: str) -> bool:
     """调用 TTS 合成语音，保存为 MP3"""
+    import requests as req
     try:
-        # 网关要求 output_format 为 url 或 hex
-        resp = _client.audio.speech.create(
-            model=_config["tts_model"],
-            voice="alloy",
-            input=text,
-            response_format="url",
-            speed=1.0,
-        )
+        # 模型名去掉 minimax/ 前缀
+        model = _config["tts_model"].replace("minimax/", "")
 
-        # response_format="url" 时返回的是文件 URL，需下载
-        url = resp.text if hasattr(resp, 'text') else str(resp)
-        if url and url.startswith("http"):
+        # gateway 要求 output_format=url, 且不能用 response_format
+        resp = req.post(
+            f"{_config['openai_base_url']}/audio/speech",
+            headers={
+                "Authorization": f"Bearer {_config['openai_api_key']}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "input": text,
+                "voice": "alloy",
+                "output_format": "url",
+                "speed": 1.0,
+            },
+            timeout=120,
+        )
+        if resp.status_code != 200:
+            err = resp.json().get("error", {}).get("message", resp.text)
+            print(f"TTS 合成失败: {err[:200]}")
+            return False
+
+        # output_format="url" 返回的是文件 URL
+        data = resp.json()
+        url = data.get("url") or data.get("audio_url") or ""
+        if url:
             _download_image(url, save_path)  # 复用图片下载逻辑
             return True
 
-        # 兼容 hex 格式或直接二进制返回
-        resp.stream_to_file(save_path)
-        return True
+        # 兼容二进制返回
+        if resp.content and len(resp.content) > 100:
+            with open(save_path, "wb") as f:
+                f.write(resp.content)
+            return True
+
+        print(f"TTS 返回异常: {str(data)[:200]}")
+        return False
     except Exception as e:
         print(f"TTS 合成失败: {e}")
         return False

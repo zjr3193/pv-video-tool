@@ -25,6 +25,35 @@ from services.api_client import (
 )
 from services.jianying_draft import build_draft as jy_build_draft
 
+
+def _concat_mp3s(files: list, output: str) -> bool:
+    """用 pydub 拼接多个 MP3 文件"""
+    try:
+        from pydub import AudioSegment
+        combined = AudioSegment.empty()
+        for f in files:
+            combined += AudioSegment.from_mp3(f)
+        combined.export(output, format="mp3")
+        return True
+    except Exception:
+        pass
+    # 回退：ffmpeg
+    try:
+        import subprocess
+        concat_list = os.path.join(os.path.dirname(output), "_concat.txt")
+        with open(concat_list, "w", encoding="utf-8") as f:
+            for fp in files:
+                f.write(f"file '{fp}'\n")
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list,
+             "-c", "copy", output],
+            capture_output=True, timeout=60
+        )
+        os.remove(concat_list)
+        return os.path.exists(output) and os.path.getsize(output) > 0
+    except Exception:
+        return False
+
 app = FastAPI(title="光伏短视频工具")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -444,33 +473,62 @@ async def api_synthesize_tts(name: str, body: dict = None):
     if not items:
         return JSONResponse({"success": True, "message": "没有可合成的口播文案"})
 
-    # 合并为一条文本
-    merged_text = "\n\n".join(img["narration"] for img in items)
-
     # 标记状态
     for img in items:
         img["tts_status"] = "synthesizing"
     data["tts_status"] = "synthesizing"
     proj.save_project(name, data)
 
-    save_path = os.path.join(OUTPUT_DIR, name, "audio", "narration.mp3")
+    audio_dir = os.path.join(OUTPUT_DIR, name, "audio")
+    os.makedirs(audio_dir, exist_ok=True)
 
-    # 后台合成
+    # 后台合成：先生成单条，再拼接
     def _run():
-        success = synthesize_tts(merged_text, save_path)
-        dur = get_audio_duration_ms(save_path) if success else 0
+        individual_files = []
+        all_success = True
+
+        # 第一步：逐个生成单条口播
+        for img in items:
+            order = str(img["order"]).zfill(2)
+            single_path = os.path.join(audio_dir, f"{order}.mp3")
+
+            success = synthesize_tts(img["narration"], single_path)
+            dur = get_audio_duration_ms(single_path) if success else 0
+
+            cur = proj.load_project(name)
+            for s in cur["set_images"]:
+                if s["id"] == img["id"]:
+                    if success:
+                        s["narration_audio"] = f"audio/{order}.mp3"
+                        s["audio_duration"] = dur
+                    s["tts_status"] = "done" if success else "failed"
+                    break
+            proj.save_project(name, cur)
+
+            if success:
+                individual_files.append(single_path)
+            else:
+                all_success = False
+
+        # 第二步：拼接所有成功的单条
+        merged_path = os.path.join(audio_dir, "narration.mp3")
+        merge_success = False
+        merge_dur = 0
+
+        if individual_files:
+            try:
+                merge_success = _concat_mp3s(individual_files, merged_path)
+                merge_dur = get_audio_duration_ms(merged_path) if merge_success else 0
+            except Exception as e:
+                log.error("音频拼接失败", str(e))
 
         cur = proj.load_project(name)
-        if success:
+        if merge_success:
             cur["narration_audio"] = "audio/narration.mp3"
-            cur["narration_duration"] = dur
+            cur["narration_duration"] = merge_dur
             cur["tts_status"] = "done"
         else:
-            cur["tts_status"] = "failed"
-
-        for s in cur["set_images"]:
-            if s.get("narration"):
-                s["tts_status"] = "done" if success else "failed"
+            cur["tts_status"] = "failed" if not all_success else "done"
         proj.save_project(name, cur)
 
     loop = asyncio.get_event_loop()
