@@ -61,11 +61,8 @@ function api(endpoint, opts={}) {
 function findMaxDoneStep() {
     if (!projectData) return 1;
     const s = projectData.status;
-    for (let i = statusMap.length - 1; i >= 0; i--) {
-        const idx = statusMap.slice(0, i + 1);
-        if (idx.includes(s)) return i + 1;
-    }
-    return 1;
+    const idx = statusMap.indexOf(s);
+    return idx >= 0 ? idx + 1 : 1;
 }
 
 function renderStepsNav() {
@@ -120,32 +117,65 @@ function renderStep() {
 function renderStep1(d) {
     let imgTag = '';
     if (d.source_image) {
-        imgTag = `<img src="/output/${projName}/${d.source_image}" class="image-preview" style="max-width:400px;">`;
+        const ts = Date.now(); // 防缓存
+        imgTag = `<div style="position:relative;display:inline-block">
+            <img src="/output/${projName}/${d.source_image}?t=${ts}" class="image-preview" style="max-width:400px;min-height:100px;"
+                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
+                 onload="this.style.opacity='1';this.nextElementSibling.style.display='none'">
+            <div style="display:none;width:400px;height:225px;background:var(--surface2);border-radius:var(--radius);align-items:center;justify-content:center;color:var(--text2)">图片预览失败</div>
+        </div>`;
     }
     return `<h2>${steps[0].name}</h2><p class="desc">上传一张已安装光伏设备的工商业屋顶参考图</p>
     <div class="upload-zone ${d.source_image ? 'has-file' : ''}" id="uploadZone"
-         onclick="document.getElementById('fileInput').click()">
+         onclick="pickFile()"
+         ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+         ondragleave="this.style.borderColor=''"
+         ondrop="event.preventDefault();this.style.borderColor='';handleDrop(event)">
         ${imgTag || '<p>&#128247; 拖拽或点击上传 (JPG/PNG/WEBP, &le;20MB)</p>'}
+        ${d.source_image ? `<p style="font-size:11px;color:var(--text2);margin-top:8px">点击/拖拽可替换图片 (原图移至discarded)</p>` : ''}
     </div>
     <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" hidden
-           onchange="uploadSource(this)">
+           onchange="handleFileSelect(this)">
     ${d.source_image ? `<div style="margin-top:20px"><button class="btn btn-primary" onclick="goToStep(2)">下一步 &#8594;</button></div>` : ''}`;
 }
 
-async function uploadSource(input) {
+function pickFile() {
+    const inp = document.getElementById('fileInput');
+    inp.value = '';
+    inp.click();
+}
+
+function handleDrop(e) {
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    doUpload(file);
+}
+
+function handleFileSelect(input) {
     const file = input.files[0];
     if (!file) return;
+    doUpload(file);
+}
+
+async function doUpload(file) {
+    if (!file.type.startsWith('image/')) { toast('仅支持图片格式', 'error'); return; }
     if (file.size > 20*1024*1024) { toast('文件大小不能超过 20MB', 'error'); return; }
+
     const form = new FormData();
     form.append('file', file);
-    const resp = await fetch(`${API}/api/projects/${projName}/upload-source`, { method: 'POST', body: form });
-    if (resp.ok) {
-        await loadProject();
-        renderStepsNav();
-        renderStep();
-        toast('源图上传成功', 'success');
-    } else {
-        toast('上传失败', 'error');
+    try {
+        const resp = await fetch(`${API}/api/projects/${projName}/upload-source`, { method: 'POST', body: form });
+        if (resp.ok) {
+            await loadProject();
+            renderStepsNav();
+            renderStep();
+            toast('源图上传成功', 'success');
+        } else {
+            const txt = await resp.text();
+            toast('上传失败: ' + txt, 'error');
+        }
+    } catch (e) {
+        toast('上传失败: ' + e.message, 'error');
     }
 }
 
