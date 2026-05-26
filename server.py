@@ -27,31 +27,23 @@ from services.jianying_draft import build_draft as jy_build_draft
 
 
 def _concat_mp3s(files: list, output: str) -> bool:
-    """用 pydub 拼接多个 MP3 文件"""
-    try:
-        from pydub import AudioSegment
-        combined = AudioSegment.empty()
-        for f in files:
-            combined += AudioSegment.from_mp3(f)
-        combined.export(output, format="mp3")
-        return True
-    except Exception:
-        pass
-    # 回退：ffmpeg
+    """用 ffmpeg 拼接多个 MP3 文件"""
     try:
         import subprocess
         concat_list = os.path.join(os.path.dirname(output), "_concat.txt")
         with open(concat_list, "w", encoding="utf-8") as f:
             for fp in files:
                 f.write(f"file '{fp}'\n")
+        ffmpeg = r"C:\Users\Administrator\bin\ffmpeg"
         subprocess.run(
-            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list,
+            [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", concat_list,
              "-c", "copy", output],
             capture_output=True, timeout=60
         )
         os.remove(concat_list)
         return os.path.exists(output) and os.path.getsize(output) > 0
-    except Exception:
+    except Exception as e:
+        print(f"音频拼接失败: {e}")
         return False
 
 app = FastAPI(title="光伏短视频工具")
@@ -535,6 +527,76 @@ async def api_synthesize_tts(name: str, body: dict = None):
     loop.run_in_executor(executor, _run)
 
     return JSONResponse({"success": True, "message": "已提交语音合成任务"})
+
+
+# ============================================
+# 单条目：生成单张口播文案
+# ============================================
+@app.post("/api/projects/{name}/generate-one-narration/{set_id}")
+async def api_generate_one_narration(name: str, set_id: str):
+    data = proj.load_project(name)
+    if data is None:
+        raise HTTPException(404, "项目不存在")
+
+    img = next((s for s in data["set_images"] if s["id"] == set_id), None)
+    if img is None:
+        raise HTTPException(404, "套图不存在")
+
+    vision = data.get("vision_result", "")
+    loop = asyncio.get_event_loop()
+    narr = await loop.run_in_executor(
+        executor, generate_narration,
+        img["scene"], img["view_angle"], vision
+    )
+
+    cur = proj.load_project(name)
+    for s in cur["set_images"]:
+        if s["id"] == set_id:
+            s["narration"] = narr
+            break
+    proj.save_project(name, cur)
+    return JSONResponse({"success": True, "narration": narr})
+
+
+# ============================================
+# 单条目：合成单条TTS
+# ============================================
+@app.post("/api/projects/{name}/synthesize-one-tts/{set_id}")
+async def api_synthesize_one_tts(name: str, set_id: str):
+    data = proj.load_project(name)
+    if data is None:
+        raise HTTPException(404, "项目不存在")
+
+    img = next((s for s in data["set_images"] if s["id"] == set_id), None)
+    if img is None:
+        raise HTTPException(404, "套图不存在")
+    if not img.get("narration"):
+        raise HTTPException(400, "请先生成口播文案")
+
+    img["tts_status"] = "synthesizing"
+    proj.save_project(name, data)
+
+    order = str(img["order"]).zfill(2)
+    save_path = os.path.join(OUTPUT_DIR, name, "audio", f"{order}.mp3")
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    def _run():
+        success = synthesize_tts(img["narration"], save_path)
+        dur = get_audio_duration_ms(save_path) if success else 0
+        cur = proj.load_project(name)
+        for s in cur["set_images"]:
+            if s["id"] == set_id:
+                s["tts_status"] = "done" if success else "failed"
+                if success:
+                    s["narration_audio"] = f"audio/{order}.mp3"
+                    s["audio_duration"] = dur
+                break
+        proj.save_project(name, cur)
+
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(executor, _run)
+
+    return JSONResponse({"success": True, "message": "TTS任务已提交"})
 
 
 # ============================================

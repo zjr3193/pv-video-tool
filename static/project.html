@@ -534,12 +534,13 @@ function renderSetRow(img) {
                 <button class="btn btn-sm btn-outline" style="color:var(--red);border-color:var(--red)" onclick="deleteSetImage('${img.id}','${img.scene}')">删除</button>
             </div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px;min-width:100px;text-align:center">
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:120px;text-align:center">
             <span class="status-dot ${img.status}"></span>
             <span style="font-size:11px;color:var(--text2)">${img.status}</span>
-            ${img.tts_status === 'synthesizing' ? '<span style="font-size:11px;color:var(--accent)"><span class="spinner" style="width:10px;height:10px"></span> 音频生成中</span>' : ''}
-            ${img.narration_audio ? `<a href="#" style="font-size:12px;color:var(--accent);text-decoration:none;margin-top:4px" onclick="playAudioPopup('${img.id}')">${img.narration_audio.split('/').pop()}</a>` : ''}
-            ${img.narration_audio ? `<button class="btn btn-sm btn-outline" style="margin-top:2px;font-size:10px;padding:2px 6px" onclick="playAudioPopup('${img.id}')">&#9654;</button>` : ''}
+            ${img.tts_status === 'synthesizing' ? '<span style="font-size:11px;color:var(--accent)"><span class="spinner" style="width:10px;height:10px"></span> 生成中</span>' : ''}
+            ${img.tts_status === 'done' && img.narration_audio ? `<a href="#" style="font-size:12px;color:var(--accent);text-decoration:none;margin-top:2px" onclick="event.preventDefault();playAudioPopup('${img.id}')">${img.narration_audio.split('/').pop()}</a>` : ''}
+            ${img.tts_status === 'done' && img.narration_audio ? `<button class="btn btn-sm btn-outline" style="margin-top:2px;font-size:10px;padding:2px 6px" onclick="playAudioPopup('${img.id}')">&#9654;</button>` : ''}
+            ${img.tts_status === 'failed' ? '<span style="font-size:11px;color:var(--red)">TTS失败</span>' : ''}
         </div>
     </div>`;
 }
@@ -617,13 +618,30 @@ async function doNarrations() {
 async function regenOneNarration(setId) {
     const img = projectData.set_images.find(i => i.id === setId);
     if (!img) return;
-    toast('正在生成口播...', 'info');
+
+    // 1. 生成口播文案
+    img.tts_status = 'synthesizing';
     img.narration = '(生成中...)';
-    projectData.set_images = projectData.set_images.map(i => i.id === setId ? img : i);
-    const resp = await api(`/api/projects/${projName}/generate-narrations`, { method: 'POST' });
+    renderStep();
+    toast('正在生成口播文案...', 'info');
+
+    const resp = await api(`/api/projects/${projName}/generate-one-narration/${setId}`, { method: 'POST' });
+    await loadProject();
+
+    if (!resp.success) { toast('口播生成失败', 'error'); return; }
+    toast('口播已生成，合成语音...', 'success');
+
+    // 2. 单条 TTS
+    const ttsResp = await api(`/api/projects/${projName}/synthesize-one-tts/${setId}`, { method: 'POST' });
     await loadProject();
     renderStep();
-    toast('口播已生成', 'success');
+
+    if (ttsResp.success) {
+        const updated = projectData.set_images.find(i => i.id === setId);
+        if (updated?.narration_audio) {
+            playAudioPopup(setId);
+        }
+    }
 }
 function viewLarge(src) {
     document.getElementById('modalContainer').innerHTML = `

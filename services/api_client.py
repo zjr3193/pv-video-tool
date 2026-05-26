@@ -320,39 +320,16 @@ def _download_image(url: str, save_path: str):
 # TTS 语音合成 (MinMax via 网关)
 # ============================================
 def synthesize_tts(text: str, save_path: str) -> bool:
-    """调用 TTS 合成语音，保存为 MP3"""
-    import requests as req
+    """调用 TTS 合成语音（参考 F:\光伏项目 的调用方式），保存为 MP3"""
     try:
-        # 模型名去掉 minimax/ 前缀
-        model = _config["tts_model"].replace("minimax/", "")
-
-        resp = req.post(
-            f"{_config['openai_base_url']}/audio/speech",
-            headers={
-                "Authorization": f"Bearer {_config['openai_api_key']}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model,
-                "input": text,
-                "voice": "alloy",
-                "output_format": "url",
-                "speed": 1.0,
-            },
-            timeout=120,
+        # 参考项目: model="speech-2.6-hd", voice="presenter_male", speed=1.3
+        resp = _client.audio.speech.create(
+            model="speech-2.6-hd",
+            voice="presenter_male",
+            input=text,
+            speed=1.3,
         )
-        if resp.status_code != 200:
-            err = ""
-            try:
-                err = resp.json().get("error", {}).get("message", resp.text[:200])
-            except:
-                err = resp.text[:200]
-            print(f"TTS 合成失败: {err}")
-            return False
-
-        # 200 响应直接是 MP3 二进制
-        with open(save_path, "wb") as f:
-            f.write(resp.content)
+        resp.stream_to_file(save_path)
         return True
     except Exception as e:
         print(f"TTS 合成失败: {e}")
