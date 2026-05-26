@@ -167,14 +167,14 @@ def api_generate_anchor(name: str):
         proj.move_to_discarded(name, os.path.basename(data["anchor_image"]))
 
     save_path = os.path.join(OUTPUT_DIR, name, "images", "anchor.png")
-    success = generate_image_from_text(en_prompt, save_path)
+    result = generate_image_from_text(en_prompt, save_path)
 
-    if success:
+    if result.get("success"):
         data["anchor_image"] = "images/anchor.png"
         data["status"] = "anchor_done"
         proj.save_project(name, data)
         return JSONResponse({"success": True, "path": data["anchor_image"]})
-    return JSONResponse({"success": False, "error": "锚图生成失败"}, 500)
+    return JSONResponse({"success": False, "error": result.get("error", "锚图生成失败")}, 500)
 
 
 # ============================================
@@ -214,7 +214,7 @@ async def api_generate_set(name: str):
             save_path = os.path.join(OUTPUT_DIR, name, "images", save_name)
 
             loop = asyncio.get_event_loop()
-            success = await loop.run_in_executor(
+            result = await loop.run_in_executor(
                 executor,
                 generate_image_from_ref,
                 anchor_path, img["prompt_diff"], save_path, ratio
@@ -222,18 +222,20 @@ async def api_generate_set(name: str):
 
             # 重新加载数据
             cur = proj.load_project(name)
+            success_flag = result.get("success")
             for s in cur["set_images"]:
                 if s["id"] == sid:
-                    if success:
+                    if success_flag:
                         if s.get("generated_image"):
                             proj.move_to_discarded(name, os.path.basename(s["generated_image"]))
                         s["status"] = "done"
                         s["generated_image"] = f"images/{save_name}"
                     else:
                         s["status"] = "failed"
+                        s["error_msg"] = result.get("error", "未知错误")
                     break
             proj.save_project(name, cur)
-            return {"id": sid, "success": success}
+            return {"id": sid, "success": success_flag, "error": result.get("error")}
 
     results = await asyncio.gather(*[gen_one(img) for img in pending])
 
@@ -275,7 +277,7 @@ async def api_regenerate_set(name: str, set_id: str):
     save_path = os.path.join(OUTPUT_DIR, name, "images", save_name)
 
     loop = asyncio.get_event_loop()
-    success = await loop.run_in_executor(
+    result = await loop.run_in_executor(
         executor,
         generate_image_from_ref,
         anchor_path, img["prompt_diff"], save_path, ratio
@@ -284,8 +286,8 @@ async def api_regenerate_set(name: str, set_id: str):
     data = proj.load_project(name)
     for s in data["set_images"]:
         if s["id"] == set_id:
-            s["status"] = "done" if success else "failed"
-            if success:
+            s["status"] = "done" if result.get("success") else "failed"
+            if result.get("success"):
                 s["generated_image"] = f"images/{save_name}"
             break
     proj.save_project(name, data)

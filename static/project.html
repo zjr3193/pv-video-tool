@@ -321,6 +321,7 @@ function renderSetCard(img) {
         <div style="font-size:11px;color:var(--text2)">${img.aspect_ratio} | ${img.view_angle}</div>
         <div style="font-size:11px;color:${statusColors[img.status]}">${img.status}</div>
         ${img.status==='failed' ? `<button class="btn btn-sm btn-outline" style="margin-top:4px" onclick="regenerateSet('${img.id}')">重试</button>` : ''}
+        ${img.error_msg ? `<div style="font-size:10px;color:var(--red);margin-top:2px;word-break:break-all" title="${img.error_msg}">${img.error_msg.substring(0,60)}</div>` : ''}
     </div>`;
 }
 

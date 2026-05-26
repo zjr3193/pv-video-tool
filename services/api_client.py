@@ -145,8 +145,9 @@ def generate_narration(scene: str, view_angle: str, vision_result: str) -> str:
 # ============================================
 # 图片生成 (gpt-image-2-all)
 # ============================================
-def generate_image_from_text(prompt: str, save_path: str) -> bool:
-    """文生图：基于 prompt 生成锚图"""
+
+def generate_image_from_text(prompt: str, save_path: str) -> dict:
+    """文生图：基于 prompt 生成锚图。返回 {success, path|error, raw_response}"""
     try:
         resp = _client.images.generate(
             model=_config["image_model"],
@@ -154,71 +155,176 @@ def generate_image_from_text(prompt: str, save_path: str) -> bool:
             n=1,
             size="1792x1024",
         )
-        url = resp.data[0].url if resp.data[0].url else resp.data[0].b64_json
+        # 检查是否异步任务
+        task_id = getattr(resp, 'id', None) or _extract_task_id(resp)
+        if task_id:
+            return _poll_and_download(task_id, save_path)
+
+        url = _extract_url(resp)
         if url:
             _download_image(url, save_path)
-            return True
+            return {"success": True, "path": save_path}
+        return {"success": False, "error": "未从响应中提取到图片URL", "raw": str(resp)[:500]}
     except Exception as e:
-        print(f"文生图失败: {e}")
-    return False
+        return {"success": False, "error": str(e)}
 
 
 def generate_image_from_ref(ref_image_path: str, prompt_diff: str, save_path: str,
-                            aspect_ratio: str = "16:9") -> bool:
-    """图生图：基于参考图 + 差异描述 生成套图"""
+                            aspect_ratio: str = "16:9") -> dict:
+    """图生图：基于参考图 + 差异描述 生成套图。返回 {success, path|error, raw_response}"""
+    size_map = {"16:9": "1792x1024", "9:16": "1024x1792"}
+    size = size_map.get(aspect_ratio, "1792x1024")
+
     try:
         b64_url = encode_image(ref_image_path)
 
-        size_map = {"16:9": "1792x1024", "9:16": "1024x1792"}
-        size = size_map.get(aspect_ratio, "1792x1024")
-
-        # 使用 chat.completions 方式调用图生图（多模态图生图）
-        resp = _client.chat.completions.create(
-            model=_config["image_model"],
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": b64_url}},
-                    {"type": "text", "text": f"Generate a photorealistic image based on the reference image with these changes: {prompt_diff}. Maintain the same factory building appearance, surroundings, lighting, and overall style. Aspect ratio {aspect_ratio}. No text, no watermarks, no logos. Photorealistic, high quality."},
-                ]
-            }],
-            max_tokens=4096,
+        # 方式1：直接 HTTP 调用 images/generations，某些网关支持 image 参数
+        import requests as req
+        resp = req.post(
+            f"{_config['openai_base_url']}/images/generations",
+            headers={
+                "Authorization": f"Bearer {_config['openai_api_key']}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": _config["image_model"],
+                "prompt": prompt_diff,
+                "n": 1,
+                "size": size,
+                "image": b64_url,  # 图生图的参考图
+                "response_format": "url",
+            },
+            timeout=120,
         )
+        data = resp.json()
+        _log_api("图生图(generations)", data)
 
-        # 从响应中提取图片
-        content = resp.choices[0].message.content
-        if content:
-            # 尝试提取 base64 图片
-            if "data:image" in content:
-                img_data = content.split("data:image/")[1]
-                img_data = img_data.split(";base64,")[1]
-                ext = content.split("data:image/")[1].split(";")[0]
-                with open(save_path, "wb") as f:
-                    f.write(base64.b64decode(img_data))
-                return True
-            # 尝试提取 URL
-            elif "http" in content:
-                import re
-                urls = re.findall(r'https?://[^\s<>"]+', content)
-                if urls:
-                    _download_image(urls[0], save_path)
-                    return True
+        # 检查异步
+        task_id = data.get("id") or data.get("task_id")
+        if task_id and not data.get("data"):
+            return _poll_task_http(task_id, save_path)
 
-        # 回退：尝试标准 images.generate 方式
-        resp2 = _client.images.generate(
-            model=_config["image_model"],
-            prompt=prompt_diff,
-            n=1,
-            size=size,
-        )
-        url = resp2.data[0].url if resp2.data[0].url else resp2.data[0].b64_json
+        # 提取图片
+        url = _extract_url_from_dict(data)
         if url:
             _download_image(url, save_path)
-            return True
+            return {"success": True, "path": save_path}
+
+        # 方式2：尝试 images/edits 接口
+        resp2 = req.post(
+            f"{_config['openai_base_url']}/images/edits",
+            headers={"Authorization": f"Bearer {_config['openai_api_key']}"},
+            data={
+                "model": _config["image_model"],
+                "prompt": prompt_diff,
+                "image": b64_url,
+                "n": 1,
+                "size": size,
+                "response_format": "url",
+            },
+            timeout=120,
+        )
+        data2 = resp2.json()
+        _log_api("图生图(edits)", data2)
+
+        url = _extract_url_from_dict(data2)
+        if url:
+            _download_image(url, save_path)
+            return {"success": True, "path": save_path}
+
+        # 失败，返回调试信息
+        return {
+            "success": False,
+            "error": f"生图API未返回图片URL. gen_resp={str(data)[:300]}, edit_resp={str(data2)[:300]}"
+        }
 
     except Exception as e:
-        print(f"图生图失败: {e}")
-    return False
+        return {"success": False, "error": str(e)}
+
+
+def _extract_task_id(resp) -> str:
+    """从 images.generate 响应中提取异步 task_id"""
+    try:
+        if hasattr(resp, 'id') and resp.id:
+            return resp.id
+        return None
+    except:
+        return None
+
+
+def _extract_url(resp) -> str:
+    """从 images.generate 响应中提取图片 URL"""
+    try:
+        if resp.data and len(resp.data) > 0:
+            item = resp.data[0]
+            return item.url or item.b64_json
+    except:
+        pass
+    return None
+
+
+def _extract_url_from_dict(data: dict) -> str:
+    """从 JSON 字典中提取图片 URL"""
+    # 标准 OpenAI 格式: {"data": [{"url": "..."}]}
+    items = data.get("data", [])
+    if items and isinstance(items, list) and len(items) > 0:
+        item = items[0]
+        url = item.get("url") or item.get("b64_json")
+        if url:
+            return url
+    # 某些网关直接返回 URL 字符串
+    url = data.get("url")
+    if url:
+        return url
+    return None
+
+
+def _poll_and_download(task_id: str, save_path: str, timeout: int = 180) -> dict:
+    """轮询异步生图任务，完成后下载"""
+    return _poll_task_http(task_id, save_path, timeout)
+
+
+def _poll_task_http(task_id: str, save_path: str, timeout: int = 180) -> dict:
+    """通过 HTTP 轮询异步任务"""
+    import requests as req
+    import time as _time
+    start = _time.time()
+    while _time.time() - start < timeout:
+        try:
+            r = req.get(
+                f"{_config['openai_base_url']}/tasks/{task_id}",
+                headers={"Authorization": f"Bearer {_config['openai_api_key']}"},
+                timeout=30,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                status = data.get("status", "")
+                if status in ("succeeded", "completed", "done"):
+                    url = _extract_url_from_dict(data)
+                    if url:
+                        _download_image(url, save_path)
+                        return {"success": True, "path": save_path}
+                    # 可能图片在 output 字段
+                    output = data.get("output", {})
+                    url = _extract_url_from_dict(output)
+                    if url:
+                        _download_image(url, save_path)
+                        return {"success": True, "path": save_path}
+                elif status in ("failed", "cancelled", "error"):
+                    return {"success": False, "error": f"生图任务失败: status={status}"}
+            elif r.status_code == 404:
+                # 任务ID不存在，可能不是异步接口，退回
+                return {"success": False, "error": f"任务 {task_id[:20]}... 不存在(404)"}
+        except Exception as e:
+            print(f"轮询异常: {e}")
+        _time.sleep(3)
+    return {"success": False, "error": f"轮询超时({timeout}s)"}
+
+
+def _log_api(name: str, data: dict):
+    """打印 API 响应摘要用于调试"""
+    summary = str(data)[:400] if data else "None"
+    print(f"[API] {name}: {summary}")
 
 
 def _download_image(url: str, save_path: str):
