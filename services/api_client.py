@@ -14,6 +14,19 @@ _client = OpenAI(
     base_url=_config["openai_base_url"],
 )
 
+# 共享 HTTP Session（绕过系统代理）
+import requests as _requests
+_http = _requests.Session()
+_http.trust_env = False
+
+
+def _post(url, json_data, timeout=120):
+    """绕过代理的 POST 请求"""
+    return _http.post(url, headers={
+        "Authorization": f"Bearer {_config['openai_api_key']}",
+        "Content-Type": "application/json",
+    }, json=json_data, timeout=timeout)
+
 
 def encode_image(image_path: str) -> str:
     """将本地图片编码为 base64 data URL"""
@@ -181,14 +194,9 @@ def generate_image_from_ref(ref_image_path: str, prompt_diff: str, save_path: st
     for attempt in range(max_retries):
         try:
             b64_url = encode_image(ref_image_path)
-            import requests as req
-            resp = req.post(
+            resp = _post(
                 f"{_config['openai_base_url']}/images/generations",
-                headers={
-                    "Authorization": f"Bearer {_config['openai_api_key']}",
-                    "Content-Type": "application/json",
-                },
-                json={
+                {
                     "model": _config["image_model"],
                     "prompt": prompt_diff,
                     "n": 1,
@@ -261,12 +269,11 @@ def _poll_and_download(task_id: str, save_path: str, timeout: int = 180) -> dict
 
 def _poll_task_http(task_id: str, save_path: str, timeout: int = 180) -> dict:
     """通过 HTTP 轮询异步任务"""
-    import requests as req
     import time as _time
     start = _time.time()
     while _time.time() - start < timeout:
         try:
-            r = req.get(
+            r = _http.get(
                 f"{_config['openai_base_url']}/tasks/{task_id}",
                 headers={"Authorization": f"Bearer {_config['openai_api_key']}"},
                 timeout=30,
@@ -303,14 +310,14 @@ def _log_api(name: str, data: dict):
 
 
 def _download_image(url: str, save_path: str):
-    """下载图片到本地"""
+    """下载图片到本地（绕过代理）"""
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     if url.startswith("data:"):
         b64_data = url.split(",", 1)[1]
         with open(save_path, "wb") as f:
             f.write(base64.b64decode(b64_data))
     else:
-        resp = requests.get(url, timeout=60)
+        resp = _http.get(url, timeout=60)
         resp.raise_for_status()
         with open(save_path, "wb") as f:
             f.write(resp.content)
