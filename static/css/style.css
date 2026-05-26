@@ -99,15 +99,13 @@ body {
 
 /* ===== FAB ===== */
 .fab {
-    position: fixed; bottom: 32px; right: 32px;
-    width: 56px; height: 56px; border-radius: 50%;
+    width: 40px; height: 40px; border-radius: var(--radius);
     background: var(--accent); color: #0f172a;
-    font-size: 28px; border: none; cursor: pointer;
-    box-shadow: var(--shadow);
+    font-size: 22px; border: none; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     transition: all .2s;
 }
-.fab:hover { transform: scale(1.1); }
+.fab:hover { background: #7dd3fc; }
 
 /* ===== 项目工作台 ===== */
 .workspace { display: flex; height: calc(100vh - 56px); }
