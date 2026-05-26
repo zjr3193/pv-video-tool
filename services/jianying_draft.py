@@ -1,5 +1,6 @@
 """剪映草稿构建：使用 pyJianYingDraft 创建模式"""
 import os
+import shutil
 import pyJianYingDraft as draft
 from pyJianYingDraft import (
     DraftFolder, VideoMaterial, AudioMaterial,
@@ -10,6 +11,24 @@ from . import load_config
 
 _config = load_config()
 DRAFT_DIR = _config["jianying_draft_dir"]
+
+
+def _find_template_draft() -> str:
+    """找到一个真实草稿作为模板（复制其辅助文件结构）"""
+    drafts = []
+    for name in os.listdir(DRAFT_DIR):
+        path = os.path.join(DRAFT_DIR, name)
+        if os.path.isdir(path) and not name.startswith('.'):
+            # 检查是否是完整的草稿（有 draft_content.json 和 Timelines/）
+            has_content = os.path.exists(os.path.join(path, "draft_content.json"))
+            has_timeline = os.path.exists(os.path.join(path, "Timelines"))
+            if has_content and has_timeline:
+                mtime = os.path.getmtime(path)
+                drafts.append((mtime, name, path))
+    drafts.sort(reverse=True)
+    if drafts:
+        return drafts[0][2]  # 返回最新草稿的路径
+    return None
 
 
 def build_draft(project_name: str, project_data: dict, aspect_ratio: str,
@@ -27,6 +46,10 @@ def build_draft(project_name: str, project_data: dict, aspect_ratio: str,
         return {"success": False, "error": f"剪映草稿目录不存在: {DRAFT_DIR}"}
 
     try:
+        draft_path = os.path.join(DRAFT_DIR, draft_name)
+        template = _find_template_draft()
+
+        # 1. 清理 + 使用 pyJianYingDraft 创建草稿核心文件
         folder = DraftFolder(DRAFT_DIR)
         if folder.has_draft(draft_name):
             folder.remove(draft_name)
@@ -34,7 +57,7 @@ def build_draft(project_name: str, project_data: dict, aspect_ratio: str,
         w, h = (1920, 1080) if aspect_ratio == "16:9" else (1080, 1920)
         script = folder.create_draft(draft_name, width=w, height=h, fps=30)
 
-        # 总时长：优先用合并口播时长，否则默认5秒/张
+        # 总时长：优先用合并口播时长
         merged_dur = project_data.get("narration_duration", 0)
         if merged_dur > 0:
             total_dur = merged_dur
@@ -46,7 +69,7 @@ def build_draft(project_name: str, project_data: dict, aspect_ratio: str,
         output_dir = os.path.join(
             os.path.dirname(os.path.dirname(__file__)), "output", project_name)
 
-        # 1. 背景音乐轨道
+        # 背景音乐轨道
         bgm_path = project_data.get("bgm_path")
         if bgm_path:
             full_bgm = os.path.join(output_dir, bgm_path)
@@ -59,13 +82,13 @@ def build_draft(project_name: str, project_data: dict, aspect_ratio: str,
                     "背景音乐"
                 )
 
-        # 2. 视频轨道
+        # 视频轨道
         script.add_track(TrackType.video, "视频轨道", relative_index=100)
 
-        # 3. 文本轨道
+        # 文本轨道
         script.add_track(TrackType.text, "文字", relative_index=200)
 
-        # 4. 合并口播音频轨道 (一条完整音频)
+        # 合并口播音频轨道
         merged_audio = project_data.get("narration_audio")
         if merged_audio:
             full_audio = os.path.join(output_dir, merged_audio)
@@ -78,7 +101,7 @@ def build_draft(project_name: str, project_data: dict, aspect_ratio: str,
                     "口播"
                 )
 
-        # 5. 遍历套图，添加视频和文字片段
+        # 遍历套图
         current_time = 0
         for img in set_images:
             dur = per_img_dur
@@ -109,6 +132,11 @@ def build_draft(project_name: str, project_data: dict, aspect_ratio: str,
             current_time += dur
 
         script.save()
+
+        # 2. 复制模板草稿的辅助文件结构（Timelines/、Resources/、draft_settings 等）
+        if template:
+            _merge_template_files(template, draft_path)
+
         return {
             "success": True,
             "draft_path": script.save_path,
@@ -120,3 +148,19 @@ def build_draft(project_name: str, project_data: dict, aspect_ratio: str,
 
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def _merge_template_files(template_dir: str, draft_dir: str):
+    """将模板草稿的辅助文件合并到新草稿（不覆盖已有核心文件）"""
+    skip = {"draft_content.json", "draft_content.json.bak", "draft_meta_info.json",
+            "draft_cover.jpg", "template-2.tmp", ".backup", ".recycle_bin"}
+    for item in os.listdir(template_dir):
+        if item in skip:
+            continue
+        src = os.path.join(template_dir, item)
+        dst = os.path.join(draft_dir, item)
+        if not os.path.exists(dst):
+            if os.path.isdir(src):
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
