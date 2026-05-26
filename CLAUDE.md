@@ -36,7 +36,7 @@ static/
 output/                     # 项目输出（gitignore）
 ```
 
-**数据流**：前端 → FastAPI → OpenAI 兼容网关 (`ai.t8star.org/v1`) → 识图/生图/文本/TTS
+**数据流**：前端 → FastAPI → OpenAI 兼容网关 → 识图/生图/文本/TTS
 
 **项目存储**：`output/<日期>/project.json` + `images/` + `audio/`，无数据库。
 

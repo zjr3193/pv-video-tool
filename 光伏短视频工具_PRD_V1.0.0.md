@@ -1023,10 +1023,10 @@ script.save()
 
 | 配置项 | 说明 | 默认值（来自 .env） |
 |--------|------|---------------------|
-| 识图 + 文本 API BaseUrl | 统一 OpenAI 兼容端点 | `https://ai.t8star.org/v1` |
+| 识图 + 文本 API BaseUrl | 统一 OpenAI 兼容端点 | `https://your-gateway.example.com/v1` |
 | 识图 + 文本 API Key | 统一 API Key | `sk-xxx` |
 | 识图 + 文本 Model | 共用 gpt-5.5 多模态模型 | `gpt-5.5` |
-| 生图 API BaseUrl | 同上 OpenAI 端点 | `https://ai.t8star.org/v1` |
+| 生图 API BaseUrl | 同上 OpenAI 端点 | `https://your-gateway.example.com/v1` |
 | 生图 API Key | 同上 API Key | `sk-xxx` |
 | 生图 Model | 主生图模型 | `gpt-image-2-all` |
 | 备用生图 Model | 生图降级模型 | `gemini-3.1-flash-image-preview-2k` |
@@ -1094,12 +1094,12 @@ V1.0 不使用数据库，所有数据以 JSON 文件存储。数据结构见第
 
 **实际 API 架构（基于 `.env` 确认）：**
 
-所有 AI API 统一通过一个 OpenAI 兼容网关 (`https://ai.t8star.org/v1`) 访问，使用同一 API Key：
+所有 AI API 统一通过一个 OpenAI 兼容网关 (`https://your-gateway.example.com/v1`) 访问，使用同一 API Key：
 
 ```
 # .env 配置项
 OPENAI_API_KEY=sk-xxx
-OPENAI_BASE_URL=https://ai.t8star.org/v1
+OPENAI_BASE_URL=https://your-gateway.example.com/v1
 OPENAI_IMAGE_MODEL=gpt-image-2-all       # 生图模型
 OPENAI_GPT_MODEL=gpt-5.5                  # 文本 + 识图共用模型
 GEMINI_IMAGE_MODEL=gemini-3.1-flash-image-preview-2k  # 备用生图模型
@@ -1160,7 +1160,7 @@ minimax_text2voice_model=minimax/speech-2.6-hd        # TTS 模型
 
 #### 已确认（来自 .env 分析）
 
-9. ✅ 三个 AI API 共用网关 `https://ai.t8star.org/v1` 和同一 Key
+9. ✅ 三个 AI API 共用网关 `https://your-gateway.example.com/v1` 和同一 Key
 10. ✅ 文本和识图共用模型 `gpt-5.5`
 11. ✅ 生图主模型 `gpt-image-2-all`，备用 `gemini-3.1-flash-image-preview-2k`
 12. ✅ TTS 模型 `minimax/speech-2.6-hd`

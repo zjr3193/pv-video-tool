@@ -10,7 +10,7 @@ def load_config():
     load_dotenv()
     return {
         "openai_api_key": os.getenv("OPENAI_API_KEY", ""),
-        "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://ai.t8star.org/v1"),
+        "openai_base_url": os.getenv("OPENAI_BASE_URL", ""),
         "image_model": os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2-all"),
         "gpt_model": os.getenv("OPENAI_GPT_MODEL", "gpt-5.5"),
         "gemini_image_model": os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image-preview-2k"),
