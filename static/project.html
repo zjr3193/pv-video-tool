@@ -53,8 +53,11 @@ function toast(msg, type='info') {
     c.appendChild(t); setTimeout(() => t.remove(), 3000);
 }
 function api(endpoint, opts={}) {
-    return fetch(`${API}${endpoint}`, opts).then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return fetch(`${API}${endpoint}`, opts).then(async r => {
+        if (!r.ok) {
+            const detail = await r.json().catch(() => ({}));
+            throw new Error(detail.detail || detail.error || `HTTP ${r.status}`);
+        }
         return r.json();
     });
 }
@@ -422,23 +425,25 @@ async function submitRegen(setId) {
     btn.disabled = true; btn.textContent = '提交中...';
 
     try {
-        await api(`/api/projects/${projName}/regenerate-set/${setId}`, {
+        const resp = await api(`/api/projects/${projName}/regenerate-set/${setId}`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ref_image: refImage, prompt: prompt})
         });
         document.getElementById('modalContainer').innerHTML = '';
-        toast('任务已提交', 'success');
 
-        // 标记本地状态为 generating (缩略图显示加载中)
-        const img = projectData.set_images.find(i => i.id === setId);
-        if (img) { img.status = 'generating'; img.generated_image = null; }
-        renderStep();
-
-        // 开始轮询
-        pollSetStatus(setId);
+        if (resp.success) {
+            toast('任务已提交', 'success');
+            const img = projectData.set_images.find(i => i.id === setId);
+            if (img) { img.status = 'generating'; img.generated_image = null; }
+            renderStep();
+            pollSetStatus(setId);
+        } else {
+            toast('提交失败: ' + (resp.error || '未知错误'), 'error');
+            btn.disabled = false; btn.textContent = '生图';
+        }
     } catch (e) {
-        toast('提交失败: ' + e.message, 'error');
+        toast('请求错误: ' + e.message, 'error');
         btn.disabled = false; btn.textContent = '生图';
     }
 }
