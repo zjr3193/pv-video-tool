@@ -326,7 +326,6 @@ def synthesize_tts(text: str, save_path: str) -> bool:
         # 模型名去掉 minimax/ 前缀
         model = _config["tts_model"].replace("minimax/", "")
 
-        # gateway 要求 output_format=url, 且不能用 response_format
         resp = req.post(
             f"{_config['openai_base_url']}/audio/speech",
             headers={
@@ -343,25 +342,18 @@ def synthesize_tts(text: str, save_path: str) -> bool:
             timeout=120,
         )
         if resp.status_code != 200:
-            err = resp.json().get("error", {}).get("message", resp.text)
-            print(f"TTS 合成失败: {err[:200]}")
+            err = ""
+            try:
+                err = resp.json().get("error", {}).get("message", resp.text[:200])
+            except:
+                err = resp.text[:200]
+            print(f"TTS 合成失败: {err}")
             return False
 
-        # output_format="url" 返回的是文件 URL
-        data = resp.json()
-        url = data.get("url") or data.get("audio_url") or ""
-        if url:
-            _download_image(url, save_path)  # 复用图片下载逻辑
-            return True
-
-        # 兼容二进制返回
-        if resp.content and len(resp.content) > 100:
-            with open(save_path, "wb") as f:
-                f.write(resp.content)
-            return True
-
-        print(f"TTS 返回异常: {str(data)[:200]}")
-        return False
+        # 200 响应直接是 MP3 二进制
+        with open(save_path, "wb") as f:
+            f.write(resp.content)
+        return True
     except Exception as e:
         print(f"TTS 合成失败: {e}")
         return False
