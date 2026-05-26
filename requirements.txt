@@ -1,0 +1,9 @@
+fastapi>=0.136
+uvicorn>=0.48
+pyJianYingDraft>=0.2.6
+openai>=2.36
+python-dotenv>=1.2
+python-multipart>=0.0.29
+aiofiles>=25.1
+pymediainfo>=7.0
+mutagen>=1.47
