@@ -2,8 +2,10 @@
 import os
 import sys
 import json
+import time
 import shutil
 import asyncio
+import traceback
 from datetime import datetime
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
@@ -15,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
 sys.path.insert(0, os.path.dirname(__file__))
-from services import project as proj
+from services import project as proj, logger as log
 from services.api_client import (
     analyze_vision, generate_anchor_prompt, generate_narration,
     generate_image_from_text, generate_image_from_ref,
@@ -46,6 +48,26 @@ app.mount("/output", StaticFiles(directory=OUTPUT_DIR), name="output")
 executor = ThreadPoolExecutor(max_workers=4)
 
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """全局请求日志 + 异常捕获"""
+    start = time.time()
+    try:
+        response = await call_next(request)
+        elapsed = time.time() - start
+        if response.status_code >= 400:
+            log.api_error(request.url.path, request.method,
+                         f"HTTP {response.status_code}")
+        elif elapsed > 5:
+            log.info(f"SLOW {request.method} {request.url.path} → {response.status_code} ({elapsed:.1f}s)")
+        return response
+    except Exception as e:
+        elapsed = time.time() - start
+        detail = traceback.format_exc()
+        log.error(f"{request.method} {request.url.path}", detail)
+        return JSONResponse({"detail": str(e), "error": str(e)}, 500)
+
+
 def html_response(filename: str):
     """返回 HTML 文件，强制禁用缓存"""
     return FileResponse(
@@ -71,6 +93,11 @@ def serve_project():
 @app.get("/settings")
 def serve_settings():
     return html_response("static/settings.html")
+
+
+@app.get("/logs")
+def serve_logs():
+    return html_response("static/logs.html")
 
 
 # ============================================
@@ -100,6 +127,25 @@ def api_get_project(name: str):
 def api_delete_project(name: str):
     proj.delete_project(name)
     return JSONResponse({"success": True})
+
+
+# ============================================
+# 日志 API
+# ============================================
+@app.get("/api/logs")
+def api_get_logs(level: str = "", limit: int = 50):
+    return JSONResponse(log.get_recent(limit, level))
+
+
+@app.get("/api/logs/files")
+def api_get_log_files():
+    return JSONResponse(log.get_log_files())
+
+
+@app.get("/api/logs/files/{filename}")
+def api_read_log_file(filename: str, tail: int = 200):
+    content = log.read_log_file(filename, tail)
+    return JSONResponse({"content": content})
 
 
 # ============================================

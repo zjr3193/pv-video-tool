@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>日志 - 光伏短视频工具</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<style>
+.log-viewer { max-width:1100px; margin:24px auto; padding:0 24px; }
+.log-entry { padding:6px 12px; font-size:13px; font-family:'Cascadia Code','Consolas',monospace; border-bottom:1px solid var(--border); white-space:pre-wrap; word-break:break-all; }
+.log-entry.ERROR, .log-entry.API_ERROR { color:var(--red); background:rgba(239,68,68,.05); }
+.log-entry.INFO, .log-entry.API_OK { color:var(--green); }
+.log-entry.SLOW { color:var(--yellow); }
+.log-filter { display:flex; gap:8px; margin-bottom:16px; }
+.log-toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+    <h1><a href="/" style="color:var(--text);text-decoration:none;"><span class="logo">&#9728;</span></a> 系统日志</h1>
+    <div class="actions">
+        <a href="/" class="btn btn-outline btn-sm">&#8592; 返回首页</a>
+    </div>
+</div>
+
+<div class="log-viewer">
+    <div class="log-toolbar">
+        <div class="log-filter">
+            <button class="btn btn-sm btn-outline" onclick="loadLogs('')">全部</button>
+            <button class="btn btn-sm btn-outline" onclick="loadLogs('ERROR')" style="color:var(--red)">错误</button>
+            <button class="btn btn-sm btn-outline" onclick="loadLogs('API_ERROR')" style="color:var(--red)">API错误</button>
+            <button class="btn btn-sm btn-outline" onclick="loadLogs('INFO')" style="color:var(--green)">信息</button>
+        </div>
+        <div>
+            <button class="btn btn-sm btn-outline" onclick="loadLogs(currentLevel)">&#8635; 刷新</button>
+            <button class="btn btn-sm btn-outline" onclick="clearLogs()">清空显示</button>
+        </div>
+    </div>
+    <div id="logContent"></div>
+</div>
+
+<script>
+let currentLevel = '';
+async function loadLogs(level) {
+    currentLevel = level;
+    try {
+        const params = level ? `?level=${level}&limit=200` : '?limit=200';
+        const resp = await fetch(`/api/logs${params}`);
+        const logs = await resp.json();
+        if (!logs.length) {
+            document.getElementById('logContent').innerHTML = '<p style="color:var(--text2);padding:20px">暂无日志</p>';
+            return;
+        }
+        document.getElementById('logContent').innerHTML = logs.reverse().map(l =>
+            `<div class="log-entry ${l.level}">${l.time} [${l.level}] ${l.msg}${l.detail ? '\n  ' + l.detail : ''}</div>`
+        ).join('');
+    } catch(e) {
+        document.getElementById('logContent').innerHTML = `<p style="color:var(--red)">加载失败: ${e.message}</p>`;
+    }
+}
+function clearLogs() {
+    document.getElementById('logContent').innerHTML = '';
+}
+loadLogs('');
+</script>
+</body>
+</html>
