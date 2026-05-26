@@ -633,9 +633,7 @@ function showCustomModal() {
                     <select class="input-field" id="customRatio"><option value="16:9">16:9 横屏</option><option value="9:16">9:16 竖屏</option></select></div>
                 <div style="margin-bottom:12px"><label style="font-size:14px;color:var(--text2);display:block;margin-bottom:4px">图片</label>
                     <div style="display:flex;gap:8px;align-items:center">
-                        <label class="btn btn-outline btn-sm" style="cursor:pointer">选择文件
-                            <input type="file" id="customFile" accept="image/*" style="display:none" onchange="document.getElementById('customFileName').textContent=this.files[0]?.name||'未选择';const r=new FileReader();r.onload=function(){document.getElementById('customPreview').src=this.result;document.getElementById('customPreview').style.display='block'};r.readAsDataURL(this.files[0])">
-                        </label>
+                        <button type="button" class="btn btn-outline btn-sm" onclick="pickCustomFile()">选择文件</button>
                         <span id="customFileName" style="font-size:12px;color:var(--text2)">未选择</span>
                     </div>
                 </div>
@@ -647,10 +645,33 @@ function showCustomModal() {
             </div>
         </div>`;
 }
+let _customFile = null;
+
+function pickCustomFile() {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = 'image/*';
+    inp.onchange = function() {
+        const file = this.files[0];
+        if (file) {
+            _customFile = file;
+            document.getElementById('customFileName').textContent = file.name;
+            const r = new FileReader();
+            r.onload = function() {
+                const preview = document.getElementById('customPreview');
+                if (preview) { preview.src = this.result; preview.style.display = 'block'; }
+            };
+            r.readAsDataURL(file);
+        }
+    };
+    inp.click();
+}
+
 async function addCustomImage() {
     const scene = document.getElementById('customScene').value.trim();
-    const file = document.getElementById('customFile').files[0];
-    if (!scene || !file) { toast('请填写场景说明并选择图片', 'error'); return; }
+    if (!scene || !_customFile) { toast('请填写场景说明并选择图片', 'error'); return; }
+    const file = _customFile;
+    _customFile = null;
     const ratio = document.getElementById('customRatio').value;
     const form = new FormData();
     form.append('file', file);
