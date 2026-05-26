@@ -607,43 +607,98 @@ async function uploadBGM(input) {
 }
 
 // ===== 步骤 7：语音合成 =====
-function renderStep7(d) {
-    const hasNarr = d.set_images.filter(i => i.narration).length;
-    const hasAudio = d.set_images.filter(i => i.narration_audio).length;
-    return `<h2>${steps[6].name}</h2><p class="desc">将口播文案合成为语音（MinMax TTS）</p>
-    <p style="font-size:14px;color:var(--text2);margin-bottom:16px">有口播的套图: ${hasNarr} 张 | 已合成: ${hasAudio} 张</p>
-    <button class="btn btn-primary" id="btnTTS" onclick="doTTS()" ${hasNarr===0?'disabled':''}>
-        ${hasAudio>0 ? '继续合成' : '一键合成全部语音'}
-    </button>
-    ${hasAudio>=hasNarr && hasNarr>0 ? `<button class="btn btn-primary" style="margin-left:12px" onclick="goToStep(8)">下一步 &#8594;</button>` : ''}
-    <div style="margin-top:20px">
-        ${d.set_images.filter(i => i.narration).map(img => `
-            <div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-                <span style="font-size:13px">${img.scene}</span>
-                <span style="font-size:12px;color:${img.narration_audio?'var(--green)':'var(--text2)'}">${img.narration_audio ? '&#10003; 已合成' : '待合成'}</span>
-                ${img.narration_audio ? `<button class="btn btn-sm btn-outline" onclick="playAudio('${img.id}')">&#9654; 试听</button>` : ''}
-            </div>
-        `).join('')}
-    </div>
-    <audio id="audioPlayer" style="display:none" controls></audio>`;
+let ttsPollTimer = null;
+
+function statusLabel(s) {
+    if (s === 'synthesizing') return '<span class="spinner" style="width:14px;height:14px"></span> 合成中';
+    if (s === 'done') return '&#10003; 已合成';
+    if (s === 'failed') return '&#10007; 失败';
+    return '待合成';
 }
+function statusColor(s) {
+    if (s === 'synthesizing') return 'var(--accent)';
+    if (s === 'done') return 'var(--green)';
+    if (s === 'failed') return 'var(--red)';
+    return 'var(--text2)';
+}
+
+function renderStep7(d) {
+    const items = d.set_images.filter(i => i.narration);
+    const total = items.length;
+    const done = items.filter(i => i.tts_status === 'done').length;
+    const synth = items.filter(i => i.tts_status === 'synthesizing').length;
+
+    return `<h2>${steps[6].name}</h2><p class="desc">将口播文案合成为语音（MinMax TTS）</p>
+    <p style="font-size:14px;color:var(--text2);margin-bottom:16px">待合成: ${total} 张 | 已合成: ${done}${synth > 0 ? ' | 合成中: ' + synth : ''}</p>
+    <button class="btn btn-primary" id="btnTTS" onclick="doTTS()" ${total===0?'disabled':''}>
+        ${done>0 ? '继续合成' : '一键合成全部语音'}
+    </button>
+    ${done>=total && total>0 ? `<button class="btn btn-primary" style="margin-left:12px" onclick="goToStep(8)">下一步 &#8594;</button>` : ''}
+    <div style="margin-top:20px">
+        ${items.map(img => {
+            const order = String(img.order).padStart(2, '0');
+            const fn = img.narration_audio ? `${order}.mp3` : `${order}.mp3`;
+            return `<div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:13px;min-width:180px">${img.scene}</span>
+                <span style="font-size:12px;color:${statusColor(img.tts_status||'')}">${statusLabel(img.tts_status||'')}</span>
+                ${img.narration_audio ? `<a href="#" style="font-size:13px;color:var(--accent);text-decoration:none;margin:0 12px" onclick="playAudioPopup('${img.id}')">${fn}</a>` : `<span style="font-size:13px;color:var(--text2);margin:0 12px">${fn}</span>`}
+                ${img.narration_audio ? `<button class="btn btn-sm btn-outline" onclick="playAudioPopup('${img.id}')">&#9654; 试听</button>` : ''}
+            </div>`;
+        }).join('')}
+    </div>`;
+}
+
 async function doTTS() {
     const btn = document.getElementById('btnTTS');
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 合成中...';
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 提交中...';
+
     const resp = await api(`/api/projects/${projName}/synthesize-tts`, { method: 'POST' });
-    await loadProject();
-    renderStepsNav();
-    renderStep();
-    toast('语音合成完成', 'success');
-}
-function playAudio(setId) {
-    const audio = document.getElementById('audioPlayer');
-    const img = projectData.set_images.find(i => i.id === setId);
-    if (img?.narration_audio) {
-        audio.src = `/output/${projName}/${img.narration_audio}`;
-        audio.style.display = 'block';
-        audio.play();
+    if (resp.success) {
+        toast(resp.message || '任务已提交', 'success');
+        await loadProject();
+        renderStep();
+
+        btn.textContent = '合成中...';
+        ttsPollTimer = setInterval(async () => {
+            await loadProject();
+            const items = projectData.set_images.filter(i => i.narration);
+            const pending = items.filter(i => i.tts_status === 'synthesizing');
+            if (pending.length === 0) {
+                clearInterval(ttsPollTimer);
+                ttsPollTimer = null;
+                renderStepsNav();
+                renderStep();
+                const done = items.filter(i => i.tts_status === 'done').length;
+                const fail = items.filter(i => i.tts_status === 'failed').length;
+                toast(`语音合成完成: ${done} 成功${fail > 0 ? ', ' + fail + ' 失败' : ''}`, fail ? 'error' : 'success');
+                btn.disabled = false;
+                btn.textContent = '继续合成';
+            } else {
+                renderStep();
+                btn.textContent = `合成中... (剩余 ${pending.length})`;
+            }
+        }, 2000);
+    } else {
+        toast('提交失败', 'error');
+        btn.disabled = false;
+        btn.textContent = '一键合成全部语音';
     }
+}
+
+function playAudioPopup(setId) {
+    const img = projectData.set_images.find(i => i.id === setId);
+    if (!img?.narration_audio) return;
+    const order = String(img.order).padStart(2, '0');
+    const src = `/output/${projName}/${img.narration_audio}`;
+    document.getElementById('modalContainer').innerHTML = `
+        <div class="modal-overlay" onclick="this.remove()">
+            <div class="modal-box" onclick="event.stopPropagation()" style="min-width:360px;max-width:500px;text-align:center">
+                <h3 style="margin-bottom:8px">${img.scene}</h3>
+                <p style="font-size:13px;color:var(--text2);margin-bottom:12px">${order}.mp3</p>
+                <audio controls autoplay style="width:100%;margin-bottom:12px" src="${src}"></audio>
+                <button class="btn btn-outline btn-sm" onclick="document.getElementById('modalContainer').innerHTML=''">关闭</button>
+            </div>
+        </div>`;
 }
 
 // ===== 步骤 8：生成草稿 =====
