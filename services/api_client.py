@@ -169,90 +169,52 @@ def generate_image_from_text(prompt: str, save_path: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def poll_task_by_id(task_id: str, save_path: str, timeout: int = 180) -> dict:
-    """根据已有 task_id 轮询并下载图片（用于重新获取）"""
-    return _poll_task_http(task_id, save_path, timeout)
-
-
 def generate_image_from_ref(ref_image_path: str, prompt_diff: str, save_path: str,
                             aspect_ratio: str = "16:9") -> dict:
-    """图生图：基于参考图 + 差异描述 生成套图。返回 {success, path|error, raw_response}"""
+    """图生图：基于参考图 + 差异描述 生成套图。API 同步返回图片URL，单次耗时约60-120s。
+    返回 {success, path|error}
+    """
     size_map = {"16:9": "1792x1024", "9:16": "1024x1792"}
     size = size_map.get(aspect_ratio, "1792x1024")
 
-    try:
-        b64_url = encode_image(ref_image_path)
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            b64_url = encode_image(ref_image_path)
+            import requests as req
+            resp = req.post(
+                f"{_config['openai_base_url']}/images/generations",
+                headers={
+                    "Authorization": f"Bearer {_config['openai_api_key']}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": _config["image_model"],
+                    "prompt": prompt_diff,
+                    "n": 1,
+                    "size": size,
+                    "image": b64_url,
+                    "response_format": "url",
+                },
+                timeout=180,
+            )
+            data = resp.json()
+            _log_api("图生图", data)
 
-        # 方式1：直接 HTTP 调用 images/generations，某些网关支持 image 参数
-        import requests as req
-        resp = req.post(
-            f"{_config['openai_base_url']}/images/generations",
-            headers={
-                "Authorization": f"Bearer {_config['openai_api_key']}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": _config["image_model"],
-                "prompt": prompt_diff,
-                "n": 1,
-                "size": size,
-                "image": b64_url,  # 图生图的参考图
-                "response_format": "url",
-            },
-            timeout=120,
-        )
-        data = resp.json()
-        _log_api("图生图(generations)", data)
+            url = _extract_url_from_dict(data)
+            if url:
+                _download_image(url, save_path)
+                return {"success": True, "path": save_path}
 
-        # 检查异步
-        task_id = data.get("id") or data.get("task_id")
-        if task_id and not data.get("data"):
-            result = _poll_task_http(task_id, save_path)
-            result["task_id"] = task_id
-            return result
+            error_msg = data.get("error", {}).get("message", "") or str(data)[:300]
+            return {"success": False, "error": error_msg}
 
-        # 提取图片
-        url = _extract_url_from_dict(data)
-        if url:
-            _download_image(url, save_path)
-            return {"success": True, "path": save_path}
-
-        # 方式2：尝试 images/edits 接口
-        resp2 = req.post(
-            f"{_config['openai_base_url']}/images/edits",
-            headers={"Authorization": f"Bearer {_config['openai_api_key']}"},
-            data={
-                "model": _config["image_model"],
-                "prompt": prompt_diff,
-                "image": b64_url,
-                "n": 1,
-                "size": size,
-                "response_format": "url",
-            },
-            timeout=120,
-        )
-        data2 = resp2.json()
-        _log_api("图生图(edits)", data2)
-
-        task_id = data2.get("id") or data2.get("task_id")
-        if task_id and not data2.get("data"):
-            result = _poll_task_http(task_id, save_path)
-            result["task_id"] = task_id
-            return result
-
-        url = _extract_url_from_dict(data2)
-        if url:
-            _download_image(url, save_path)
-            return {"success": True, "path": save_path}
-
-        # 失败，返回调试信息
-        return {
-            "success": False,
-            "error": f"生图API未返回图片URL. gen_resp={str(data)[:300]}, edit_resp={str(data2)[:300]}"
-        }
-
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"图生图重试 {attempt+1}/{max_retries}: {e}")
+                time.sleep(3)
+            else:
+                return {"success": False, "error": str(e)}
 
 
 def _extract_task_id(resp) -> str:

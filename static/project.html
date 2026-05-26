@@ -321,7 +321,6 @@ function renderSetCard(img) {
         <div style="font-size:11px;color:var(--text2)">${img.aspect_ratio} | ${img.view_angle}</div>
         <div style="font-size:11px;color:${statusColors[img.status]}">${img.status}</div>
         ${img.status==='failed' ? `<button class="btn btn-sm btn-outline" style="margin-top:4px" onclick="regenerateSet('${img.id}')">重新生成</button>` : ''}
-        ${img.status==='failed' && img.task_id ? `<button class="btn btn-sm btn-outline" style="margin-top:4px" onclick="repollTask('${img.id}')">重新获取</button>` : ''}
         ${img.error_msg ? `<div style="font-size:10px;color:var(--red);margin-top:2px;word-break:break-all" title="${img.error_msg}">${img.error_msg.substring(0,60)}</div>` : ''}
     </div>`;
 }
@@ -343,17 +342,6 @@ async function regenerateSet(setId) {
     await loadProject();
     renderStep();
     toast('重生成完成', 'success');
-}
-async function repollTask(setId) {
-    toast('正在重新获取原任务结果...', 'info');
-    const resp = await api(`/api/projects/${projName}/repoll-set/${setId}`, { method: 'POST' });
-    await loadProject();
-    renderStep();
-    if (resp.success) {
-        toast('重新获取成功', 'success');
-    } else {
-        toast('重新获取失败: ' + (resp.error || '未知错误'), 'error');
-    }
 }
 
 // ===== 步骤 6：内容编辑 =====
