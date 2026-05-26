@@ -512,9 +512,12 @@ function renderSetRow(img) {
                 ${!img.is_custom ? `<button class="btn btn-sm btn-outline" onclick="showRegenModal('${img.id}')">重新生图</button>` : ''}
             </div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;flex-direction:column;gap:6px;min-width:100px;text-align:center">
             <span class="status-dot ${img.status}"></span>
             <span style="font-size:11px;color:var(--text2)">${img.status}</span>
+            ${img.tts_status === 'synthesizing' ? '<span style="font-size:11px;color:var(--accent)"><span class="spinner" style="width:10px;height:10px"></span> 音频生成中</span>' : ''}
+            ${img.narration_audio ? `<a href="#" style="font-size:12px;color:var(--accent);text-decoration:none;margin-top:4px" onclick="playAudioPopup('${img.id}')">${img.narration_audio.split('/').pop()}</a>` : ''}
+            ${img.narration_audio ? `<button class="btn btn-sm btn-outline" style="margin-top:2px;font-size:10px;padding:2px 6px" onclick="playAudioPopup('${img.id}')">&#9654;</button>` : ''}
         </div>
     </div>`;
 }
@@ -532,12 +535,48 @@ async function updateSetField(setId, field, value) {
     });
 }
 async function doNarrations() {
-    toast('正在批量生成口播...', 'info');
+    const btn = event.target;
+    btn.disabled = true; btn.textContent = '生成口播中...';
+
+    toast('正在批量生成口播文案...', 'info');
     const resp = await api(`/api/projects/${projName}/generate-narrations`, { method: 'POST' });
     await loadProject();
     renderStepsNav();
     renderStep();
-    toast('口播文案已生成', 'success');
+    toast(resp.message || '口播文案已生成', 'success');
+
+    // 自动触发 TTS 合成
+    btn.textContent = '启动TTS合成...';
+    const ttsResp = await api(`/api/projects/${projName}/synthesize-tts`, { method: 'POST' });
+    if (ttsResp.success) {
+        await loadProject();
+        renderStep();
+        btn.textContent = '音频生成中...';
+
+        // 轮询 TTS
+        ttsPollTimer = setInterval(async () => {
+            await loadProject();
+            const items = projectData.set_images.filter(i => i.narration);
+            const pending = items.filter(i => i.tts_status === 'synthesizing');
+            if (pending.length === 0) {
+                clearInterval(ttsPollTimer);
+                ttsPollTimer = null;
+                renderStepsNav();
+                renderStep();
+                btn.disabled = false;
+                btn.textContent = '批量生成口播';
+                const done = items.filter(i => i.tts_status === 'done').length;
+                const fail = items.filter(i => i.tts_status === 'failed').length;
+                toast(`口播+语音完成: ${done} 成功${fail > 0 ? ', ' + fail + ' 失败' : ''}`, fail ? 'error' : 'success');
+            } else {
+                renderStep();
+                btn.textContent = `音频生成中... (${pending.length})`;
+            }
+        }, 2000);
+    } else {
+        btn.disabled = false;
+        btn.textContent = '批量生成口播';
+    }
 }
 async function regenOneNarration(setId) {
     const img = projectData.set_images.find(i => i.id === setId);
