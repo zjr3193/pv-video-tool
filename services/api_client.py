@@ -345,14 +345,13 @@ def get_audio_duration_ms(audio_path: str) -> int:
             if track.track_type == "Audio" or track.track_type == "General":
                 dur = getattr(track, "duration", None)
                 if dur:
-                    return int(float(dur))  # 毫秒 → 微秒需要*1000，但 pymediainfo 返回的是毫秒
+                    return int(float(dur) * 1000)  # pymediainfo 返回毫秒，转为微秒
         return 0
     except:
         pass
-    # 回退：用 mutagen
     try:
         from mutagen.mp3 import MP3
         audio = MP3(audio_path)
-        return int(audio.info.length * 1_000_000)
+        return int(audio.info.length * 1_000_000)  # mutagen 返回秒，转为微秒
     except:
         return 0
