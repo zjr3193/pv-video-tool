@@ -169,6 +169,11 @@ def generate_image_from_text(prompt: str, save_path: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
+def poll_task_by_id(task_id: str, save_path: str, timeout: int = 180) -> dict:
+    """根据已有 task_id 轮询并下载图片（用于重新获取）"""
+    return _poll_task_http(task_id, save_path, timeout)
+
+
 def generate_image_from_ref(ref_image_path: str, prompt_diff: str, save_path: str,
                             aspect_ratio: str = "16:9") -> dict:
     """图生图：基于参考图 + 差异描述 生成套图。返回 {success, path|error, raw_response}"""
@@ -202,7 +207,9 @@ def generate_image_from_ref(ref_image_path: str, prompt_diff: str, save_path: st
         # 检查异步
         task_id = data.get("id") or data.get("task_id")
         if task_id and not data.get("data"):
-            return _poll_task_http(task_id, save_path)
+            result = _poll_task_http(task_id, save_path)
+            result["task_id"] = task_id
+            return result
 
         # 提取图片
         url = _extract_url_from_dict(data)
@@ -226,6 +233,12 @@ def generate_image_from_ref(ref_image_path: str, prompt_diff: str, save_path: st
         )
         data2 = resp2.json()
         _log_api("图生图(edits)", data2)
+
+        task_id = data2.get("id") or data2.get("task_id")
+        if task_id and not data2.get("data"):
+            result = _poll_task_http(task_id, save_path)
+            result["task_id"] = task_id
+            return result
 
         url = _extract_url_from_dict(data2)
         if url:

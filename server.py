@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from services import project as proj
 from services.api_client import (
     analyze_vision, generate_anchor_prompt, generate_narration,
-    generate_image_from_text, generate_image_from_ref,
+    generate_image_from_text, generate_image_from_ref, poll_task_by_id,
     synthesize_tts, get_audio_duration_ms,
 )
 from services.jianying_draft import build_draft as jy_build_draft
@@ -230,9 +230,11 @@ async def api_generate_set(name: str):
                             proj.move_to_discarded(name, os.path.basename(s["generated_image"]))
                         s["status"] = "done"
                         s["generated_image"] = f"images/{save_name}"
+                        s["task_id"] = result.get("task_id", "")
                     else:
                         s["status"] = "failed"
                         s["error_msg"] = result.get("error", "未知错误")
+                        s["task_id"] = result.get("task_id", "")
                     break
             proj.save_project(name, cur)
             return {"id": sid, "success": success_flag, "error": result.get("error")}
@@ -292,7 +294,52 @@ async def api_regenerate_set(name: str, set_id: str):
             break
     proj.save_project(name, data)
 
-    return JSONResponse({"success": success})
+    return JSONResponse({"success": success, "task_id": result.get("task_id")})
+
+
+# ============================================
+# 重新获取：按 task_id 轮询已提交的生图任务
+# ============================================
+@app.post("/api/projects/{name}/repoll-set/{set_id}")
+async def api_repoll_set(name: str, set_id: str):
+    data = proj.load_project(name)
+    if data is None:
+        raise HTTPException(404, "项目不存在")
+
+    img = next((s for s in data["set_images"] if s["id"] == set_id), None)
+    if img is None:
+        raise HTTPException(404, "套图不存在")
+
+    task_id = img.get("task_id")
+    if not task_id:
+        raise HTTPException(400, "该套图没有关联的异步任务ID，可能是同步生成或任务ID丢失")
+
+    ratio = img["aspect_ratio"]
+    save_name = f"{set_id}_{ratio.replace(':', 'x')}.png"
+    save_path = os.path.join(OUTPUT_DIR, name, "images", save_name)
+
+    # 废弃旧图
+    if img.get("generated_image"):
+        proj.move_to_discarded(name, os.path.basename(img["generated_image"]))
+
+    # 轮询
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(executor, poll_task_by_id, task_id, save_path)
+
+    data = proj.load_project(name)
+    for s in data["set_images"]:
+        if s["id"] == set_id:
+            if result.get("success"):
+                s["status"] = "done"
+                s["generated_image"] = f"images/{save_name}"
+                s["error_msg"] = ""
+            else:
+                s["status"] = "failed"
+                s["error_msg"] = result.get("error", "重新获取失败")
+            break
+    proj.save_project(name, data)
+
+    return JSONResponse(result)
 
 
 # ============================================
