@@ -291,6 +291,10 @@ async def api_regenerate_set(name: str, set_id: str):
             s["status"] = "done" if result.get("success") else "failed"
             if result.get("success"):
                 s["generated_image"] = f"images/{save_name}"
+                s["task_id"] = result.get("task_id", "")
+            else:
+                s["task_id"] = result.get("task_id", "")
+                s["error_msg"] = result.get("error", "未知错误")
             break
     proj.save_project(name, data)
 
