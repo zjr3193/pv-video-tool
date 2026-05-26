@@ -1,34 +1,3 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>项目工作台 - 光伏短视频工具</title>
-<link rel="stylesheet" href="/static/css/style.css">
-</head>
-<body>
-
-<div class="topbar">
-    <h1><a href="/" style="color:var(--text);text-decoration:none;"><span class="logo">&#9728;</span></a> <span id="projectTitle">项目工作台</span></h1>
-    <div class="actions">
-        <a href="/" class="btn btn-outline btn-sm">&#8592; 返回首页</a>
-    </div>
-</div>
-
-<div class="workspace">
-    <!-- 步骤导航 -->
-    <div class="steps-nav" id="stepsNav"></div>
-
-    <!-- 主操作区 -->
-    <div class="main-area" id="mainArea">
-        <h2>加载中...</h2>
-    </div>
-</div>
-
-<div class="toast-container" id="toastContainer"></div>
-<div id="modalContainer"></div>
-
-<script>
 const API = '';
 const projName = new URLSearchParams(location.search).get('name');
 let projectData = null;
@@ -573,6 +542,3 @@ async function buildDraft(aspect) {
             <button class="btn btn-outline" style="margin-left:8px" onclick="location.href='/'">返回首页</button>`;
     }
 })();
-</script>
-</body>
-</html>
