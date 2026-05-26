@@ -304,6 +304,7 @@ def _log_api(name: str, data: dict):
 
 def _download_image(url: str, save_path: str):
     """下载图片到本地"""
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     if url.startswith("data:"):
         b64_data = url.split(",", 1)[1]
         with open(save_path, "wb") as f:
